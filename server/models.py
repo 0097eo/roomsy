@@ -30,6 +30,7 @@ class User(db.Model):
     password_hash = db.Column(db.String(255), nullable=False)
     role = db.Column(db.Enum(UserRole), nullable=False, default=UserRole.CLIENT)
     verification_code = db.Column(db.String(255))
+    auth0_sub = db.Column(db.String(255), unique=True)
     created_at = db.Column(db.DateTime, default=func.now())
     updated_at = db.Column(db.DateTime, default=func.now(), onupdate=func.now())
 

@@ -3,13 +3,27 @@ from email.mime.text import MIMEText
 import smtplib
 import re
 from flask_restful import Resource
-from flask import request
+from flask import redirect, session, url_for, request
 from models import User, UserRole
 from config import app, db, api
 import secrets
 import os
+import requests
 from datetime import timedelta
-from flask_jwt_extended import create_access_token
+from flask_jwt_extended import create_access_token, jwt_required, get_jwt_identity
+from authlib.integrations.flask_client import OAuth
+
+oauth = OAuth(app)
+auth0 = oauth.register(
+    name='auth0',
+    client_id=app.config.get('AUTH0_CLIENT_ID'),
+    client_secret=app.config.get('AUTH0_CLIENT_SECRET'),
+    client_kwargs={
+        'scope': 'openid profile email'
+    },
+    server_metadata_url=f'https://{app.config.get("AUTH0_DOMAIN")}/.well-known/openid-configuration'
+)
+
 
 def validate_email(email):
     pattern = r'^[\w\.-]+@[\w\.-]+\.\w+$'
@@ -208,13 +222,122 @@ class Login(Resource):
             return {
                 'access_token': access_token,
                 'user_id': user.id,
-                'user_type': user.role.value
+                'user_type': user.role.value,
+                'user_name': user.name,
             }, 200
         
         except Exception as e:
             return {'error': str(e)}, 500
+        
+class Auth0Login(Resource):
+    def get(self):
+        """Redirect to Auth0 login"""
+        redirect_uri = url_for('auth0_callback', _external=True)
+        return redirect(
+            auth0.authorize_redirect(
+                redirect_uri=redirect_uri,
+                audience=app.config.get('AUTH0_AUDIENCE')
+            )
+        )
 
+class Auth0Callback(Resource):
+    def get(self):
+        """Handle Auth0 callback"""
+        try:
+            # Exchange authorization code for tokens
+            token = auth0.authorize_access_token()
+            
+            # Fetch user info
+            user_info = requests.get(
+                f'https://{app.config.get("AUTH0_DOMAIN")}/userinfo', 
+                headers={'Authorization': f'Bearer {token["access_token"]}'}
+            ).json()
 
+            # Extract user details
+            email = user_info.get('email')
+            name = user_info.get('name', email.split('@')[0])
+            auth0_sub = user_info.get('sub')
+
+            if not email:
+                return {'error': 'Unable to retrieve user email'}, 400
+
+            # Find or create user
+            user = User.query.filter_by(email=email).first()
+            
+            if not user:
+                user = User(
+                    email=email,
+                    username=name,
+                    role=UserRole.CLIENT,
+                    verification_code=None,
+                    auth0_sub=auth0_sub,
+                    is_verified=True
+                )
+                db.session.add(user)
+                db.session.commit()
+            else:
+                # Update Auth0 sub if not set
+                if not user.auth0_sub:
+                    user.auth0_sub = auth0_sub
+                    db.session.commit()
+
+            # Generate JWT token
+            access_token = create_access_token(
+                identity=user.id,
+                additional_claims={
+                    'user_type': user.role.value,
+                    'auth0_sub': auth0_sub
+                },
+                expires_delta=timedelta(days=1)
+            )
+
+            # Store additional user info in session if needed
+            session['auth0_user'] = user_info
+
+            # Return access token and user info
+            return {
+                'access_token': access_token,
+                'user_id': user.id,
+                'user_type': user.role.value,
+                'email': email,
+                'name': name
+            }, 200
+
+        except Exception as e:
+            app.logger.error(f"Auth0 Callback Error: {str(e)}")
+            return {'error': 'Authentication failed'}, 500
+
+class Auth0Logout(Resource):
+    @jwt_required()
+    def post(self):
+        """Logout user from Auth0 and clear session"""
+        # Clear local session
+        session.clear()
+
+        # Build logout URL
+        return {
+            'logout_url': f'https://{app.config.get("AUTH0_DOMAIN")}/v2/logout?'
+                          f'client_id={app.config.get("AUTH0_CLIENT_ID")}&'
+                          f'returnTo={request.host_url}'
+        }, 200
+
+class ProfileResource(Resource):
+    @jwt_required()
+    def get(self):
+        """Get current user profile"""
+        current_user_id = get_jwt_identity()
+        user = User.query.get(current_user_id)
+        
+        if not user:
+            return {'error': 'User not found'}, 404
+        
+        return user.to_dict(), 200
+
+# Add Auth0 routes
+api.add_resource(Auth0Login, '/auth0/login')
+api.add_resource(Auth0Callback, '/auth0/callback')
+api.add_resource(Auth0Logout, '/auth0/logout')
+api.add_resource(ProfileResource, '/profile')
 api.add_resource(Login, '/login')
 api.add_resource(Register, '/register')
 api.add_resource(VerifyEmail, '/verify-email')
