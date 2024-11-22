@@ -123,9 +123,22 @@ def create_spaces(users, num_spaces=30):
     space_types = ['Office', 'Studio', 'Conference Room', 'Workshop Space', 
                    'Event Space', 'Meeting Room', 'Classroom', 'Coworking Space']
     
+    # Define possible space rules
+    rules_options = [
+        "No smoking inside the premises.",
+        "Pets are not allowed.",
+        "Booking required in advance.",
+        "Respect the property and other users.",
+        "Keep noise levels to a minimum.",
+        "No overnight stays.",
+        "Food and drink allowed only in designated areas.",
+        "Parking available for tenants only."
+    ]
+    
     for i in range(num_spaces):
         owner = random.choice(owners)
         amenities = random.sample(amenities_options, random.randint(4, 10))
+        rules = random.sample(rules_options, random.randint(2, 5))
         space_type = random.choice(space_types)
         
         space = Space(
@@ -138,7 +151,7 @@ def create_spaces(users, num_spaces=30):
             daily_price=Decimal(str(random.uniform(80.0, 800.0))).quantize(Decimal('0.01')),
             status=random.choice(list(SpaceStatus)),
             amenities=amenities,
-            rules="\n".join(fake.sentences(nb=3))
+            rules=rules
         )
         spaces.append(space)
     
@@ -146,6 +159,7 @@ def create_spaces(users, num_spaces=30):
     db.session.commit()
     print(f"✅ Created {len(spaces)} spaces")
     return spaces
+
 
 def create_space_images(spaces):
     """Create sample images for each space"""

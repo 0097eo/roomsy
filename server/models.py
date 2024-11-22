@@ -72,8 +72,8 @@ class Space(db.Model):
     hourly_price = db.Column(db.Numeric(10, 2), nullable=False)
     daily_price = db.Column(db.Numeric(10, 2), nullable=False)
     status = db.Column(Enum(SpaceStatus), default=SpaceStatus.AVAILABLE)
-    amenities = db.Column(db.JSON) #store amenities in a JSON array
-    rules = db.Column(db.Text)
+    amenities = db.Column(db.JSON) 
+    rules = db.Column(db.JSON)
     created_at = db.Column(db.DateTime, default=func.now())
     updated_at = db.Column(db.DateTime, default=func.now(), onupdate=func.now())
 
