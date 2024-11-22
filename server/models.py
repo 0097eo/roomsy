@@ -39,8 +39,8 @@ class User(db.Model):
     social_provider = db.Column(db.String(50), nullable=True)
 
     # Relationships
-    spaces = db.relationship('Space', backref='owner', lazy=True)
-    bookings = db.relationship('Booking', backref='client', lazy=True)
+    spaces = db.relationship('Space', backref='owner', lazy=True, cascade='all, delete-orphan')
+    bookings = db.relationship('Booking', backref='client', lazy=True, cascade='all, delete-orphan')
 
     @property
     def password(self):
@@ -78,8 +78,8 @@ class Space(db.Model):
     updated_at = db.Column(db.DateTime, default=func.now(), onupdate=func.now())
 
      # Relationships
-    bookings = db.relationship('Booking', backref='space', lazy=True)
-    images = db.relationship('SpaceImage', backref='space', lazy=True)
+    bookings = db.relationship('Booking', backref='space', lazy=True, cascade='all, delete-orphan')
+    images = db.relationship('SpaceImage', backref='space', lazy=True, cascade='all, delete-orphan')
     
     @validates('hourly_rate', 'daily_rate')
     def validate_rates(self, key, value):
@@ -111,7 +111,7 @@ class Booking(db.Model):
     updated_at = db.Column(db.DateTime, default=func.now(), onupdate=func.now())
 
      # Relationships
-    payment = db.relationship('Payment', backref='booking', lazy=True, uselist=False)
+    payment = db.relationship('Payment', backref='booking', lazy=True, uselist=False, cascade='all, delete-orphan')
     
     @validates('start_time', 'end_time')
     def validate_booking_times(self, key, value):

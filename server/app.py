@@ -4,14 +4,16 @@ import smtplib
 import re
 from flask_restful import Resource
 from flask import redirect, session, url_for, request
-from models import User, UserRole
+from models import User, UserRole, Space, SpaceStatus
 from config import app, db, api
 import secrets
 import os
 import requests
-from datetime import timedelta
+from datetime import timedelta, datetime
 from flask_jwt_extended import create_access_token, jwt_required, get_jwt_identity
 from authlib.integrations.flask_client import OAuth
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
+from sqlalchemy import func
 
 oauth = OAuth(app)
 auth0 = oauth.register(
@@ -208,24 +210,23 @@ class Login(Resource):
             
             user = User.query.filter_by(email=data['email']).first()
             if not user or not user.verify_password(data['password']):
-                return {'error': 'User not found'}, 404
+                return {'error': 'Invalid email or password'}, 401
             
             if user.verification_code:
-                return {'error': 'Email not verified'}, 401
+                return {'error': 'Email not yet verified'}, 401
             
             access_token = create_access_token(
-                identity=user.id,
-                additional_claims={'user_type': user.role.value},
+                identity=str(user.id),
+                additional_claims={'role': user.role.value},
                 expires_delta=timedelta(days=1)
             )
-
+                   
             return {
                 'access_token': access_token,
                 'user_id': user.id,
-                'user_type': user.role.value,
-                'user_name': user.name,
+                'role': user.role.value
             }, 200
-        
+            
         except Exception as e:
             return {'error': str(e)}, 500
         
@@ -283,7 +284,7 @@ class Auth0Callback(Resource):
 
             # Generate JWT token
             access_token = create_access_token(
-                identity=user.id,
+                identity=str(user.id),
                 additional_claims={
                     'user_type': user.role.value,
                     'auth0_sub': auth0_sub
@@ -332,8 +333,228 @@ class ProfileResource(Resource):
             return {'error': 'User not found'}, 404
         
         return user.to_dict(), 200
+    
+class SpaceResource(Resource):
+    @jwt_required()
+    def get(self):
+        try:
+            # Get query parameters
+            status = request.args.get('status')
+            page = request.args.get('page', 1, type=int)
+            per_page = request.args.get('per_page', 10, type=int)
+            search = request.args.get('search', '')
 
-# Add Auth0 routes
+            # Get current user's type from JWT claims
+            current_user_id = get_jwt_identity()  # Ensure this is a string
+            current_user = db.session.get(User, current_user_id)
+            
+            if not current_user:
+                return {'error': 'User not found'}, 404
+
+            # Initialize the query object for Space
+            query = Space.query
+
+            # Apply status filter
+            if current_user.role == UserRole.ADMIN:
+                if status:
+                    try:
+                        space_status = SpaceStatus(status)
+                        query = query.filter(Space.status == space_status)
+                    except ValueError:
+                        return {'error': 'Invalid status value'}, 400
+                # If no status specified, show all spaces for admin
+            else:
+                # Non-admins can only see available spaces
+                query = query.filter(Space.status == SpaceStatus.AVAILABLE)
+
+            # Apply search filter if provided
+            if search:
+                search_term = f"%{search}%"
+                query = query.filter(
+                    db.or_(
+                        Space.name.ilike(search_term),
+                        Space.description.ilike(search_term)
+                    )
+                )
+
+            # Execute paginated query
+            paginated_spaces = query.paginate(
+                page=page,
+                per_page=per_page,
+                error_out=False
+            )
+
+            # Prepare response data
+            spaces = []
+            for space in paginated_spaces.items:
+                space_data = {
+                    'id': space.id,
+                    'name': space.name,
+                    'description': space.description,
+                    'address': space.address,
+                    'status': space.status.value,
+                    'hourly_price': str(space.hourly_price),
+                    'daily_price': str(space.daily_price),
+                    'capacity': space.capacity,
+                    'amenities': space.amenities,
+                    'rules': space.rules,
+                    'images': [image.image_url for image in space.images]
+                }
+                spaces.append(space_data)
+
+            return {
+                'spaces': spaces,
+                'pagination': {
+                    'total_items': paginated_spaces.total,
+                    'total_pages': paginated_spaces.pages,
+                    'current_page': page,
+                    'per_page': per_page,
+                    'has_next': paginated_spaces.has_next,
+                    'has_prev': paginated_spaces.has_prev
+                }
+            }, 200
+
+        except Exception as e:
+            return {'error': str(e)}, 500
+        
+    @jwt_required()
+    def post(self):
+        """Create a new space"""
+        try:
+            current_user_id = get_jwt_identity()
+            current_user = db.session.get(User, current_user_id)
+
+            if not current_user:
+                return {'error': 'User not found'}, 404
+            
+            if current_user.role != UserRole.ADMIN or current_user.role != UserRole.OWNER:
+                return {'error': 'Only admins can create spaces'}, 403
+            
+            data = request.get_json()
+
+            required_fields = ['name', 'description', 'address', 'capacity', 'hourly_price', 'daily_price', 'status', 'amenities', 'rules']
+            for field in required_fields:
+                if field not in data:
+                    return {'error': f'{field} is required'}, 400
+
+            new_space = Space(
+                owner_id=current_user.id,
+                name=data['name'],
+                description=data['description'],
+                address=data['address'],
+                capacity=data['capacity'],
+                hourly_price=data['hourly_price'],
+                daily_price=data['daily_price'],
+                status=SpaceStatus[data['status']],
+                amenities=data['amenities'],
+                rules=data['rules']
+            )
+            db.session.add(new_space)
+            db.session.commit()
+
+            return {'message': 'Space created successfully', 'space_id': new_space.id}, 201
+        
+        except IntegrityError as e:
+            db.session.rollback()  # In case of an integrity error
+            return {'error': 'Database error: Integrity issue'}, 500
+        except Exception as e:
+            db.session.rollback()  # Rollback in case of other errors
+            return {'error': str(e)}, 500
+        
+    @jwt_required()
+    def put(self, space_id):
+        """Update a space's details (Admin or Owner only)"""
+        try:
+            # Get the current user
+            current_user_id = get_jwt_identity()
+            current_user = db.session.get(User, current_user_id)
+
+            if not current_user:
+                return {'error': 'User not found'}, 404
+
+            # Ensure the space exists
+            space = db.session.get(Space, space_id)
+            if not space:
+                return {'error': 'Space not found'}, 404
+
+            # Check if the user is the owner of the space or an admin
+            if space.owner_id != current_user.id and current_user.role != UserRole.ADMIN:
+                return {'error': 'Permission denied. You must be the owner or an admin to update this space.'}, 403
+
+            # Get data from the request
+            data = request.get_json()
+
+            # Update space details
+            if 'name' in data:
+                space.name = data['name']
+            if 'description' in data:
+                space.description = data['description']
+            if 'address' in data:
+                space.address = data['address']
+            if 'capacity' in data:
+                space.capacity = data['capacity']
+            if 'hourly_price' in data:
+                space.hourly_price = data['hourly_price']
+            if 'daily_price' in data:
+                space.daily_price = data['daily_price']
+            if 'status' in data:
+                space.status = SpaceStatus(data['status'])
+            if 'amenities' in data:
+                space.amenities = data['amenities']
+            if 'rules' in data:
+                space.rules = data['rules']
+
+            # Set the updated time
+            space.updated_at = func.now()
+
+            # Commit the changes to the database
+            db.session.commit()
+
+            return {'message': 'Space updated successfully'}, 200
+
+        except SQLAlchemyError as e:
+            db.session.rollback()
+            return {'error': str(e)}, 500
+        except Exception as e:
+            db.session.rollback()
+            return {'error': str(e)}, 500
+        
+    @jwt_required()
+    def delete(self, space_id):
+        """Delete a space (Admin or Owner only)"""
+        try:
+            # Get the current user
+            current_user_id = get_jwt_identity()
+            current_user = db.session.get(User, current_user_id)
+
+            if not current_user:
+                return {'error': 'User not found'}, 404
+
+            # Ensure the space exists
+            space = db.session.get(Space, space_id)
+            if not space:
+                return {'error': 'Space not found'}, 404
+
+            # Check if the user is the owner of the space or an admin
+            if space.owner_id!= current_user.id and current_user.role!= UserRole.ADMIN:
+                return {'error': 'Permission denied. You must be the owner or an admin to delete this space.'}, 403
+
+            # Delete the space and all its associated images
+            db.session.delete(space)
+            db.session.commit()
+
+            return {'message': 'Space deleted successfully'}, 200
+        
+        except SQLAlchemyError as e:
+            db.session.rollback()
+            return {'error': str(e)}, 500
+        except Exception as e:
+            db.session.rollback()
+            return {'error': str(e)}, 500
+    
+
+
+api.add_resource(SpaceResource, '/spaces', '/spaces/<int:space_id>')
 api.add_resource(Auth0Login, '/auth0/login')
 api.add_resource(Auth0Callback, '/auth0/callback')
 api.add_resource(Auth0Logout, '/auth0/logout')
