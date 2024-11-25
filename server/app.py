@@ -4,7 +4,7 @@ import smtplib
 import re
 from flask_restful import Resource
 from flask import redirect, session, url_for, request
-from models import User, UserRole, Space, SpaceStatus
+from models import User, UserRole, Space, SpaceStatus, Booking, BookingStatus
 from config import app, db, api
 import secrets
 import os
@@ -13,7 +13,8 @@ from datetime import timedelta, datetime
 from flask_jwt_extended import create_access_token, jwt_required, get_jwt_identity
 from authlib.integrations.flask_client import OAuth
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
-from sqlalchemy import func
+from sqlalchemy import func, and_, or_
+from decimal import Decimal
 
 oauth = OAuth(app)
 auth0 = oauth.register(
@@ -552,8 +553,325 @@ class SpaceResource(Resource):
             db.session.rollback()
             return {'error': str(e)}, 500
     
+class ClientSpaceResource(Resource):
+    """Resource for client-specific space operations"""
+    
+    def get(self):
+        """
+        Get a list of available spaces with basic information
+        Supports pagination and search functionality
+        """
+        try:
+            # Get query parameters
+            page = request.args.get('page', 1, type=int)
+            per_page = request.args.get('per_page', 10, type=int)
+            search = request.args.get('search', '')
+            
+            # Base query - only show available spaces to clients
+            query = Space.query.filter(Space.status == SpaceStatus.AVAILABLE)
+            
+            # Apply search if provided
+            if search:
+                search_term = f"%{search}%"
+                query = query.filter(
+                    db.or_(
+                        Space.name.ilike(search_term),
+                        Space.description.ilike(search_term),
+                        Space.address.ilike(search_term)
+                    )
+                )
+            
+            # Execute paginated query
+            paginated_spaces = query.paginate(
+                page=page,
+                per_page=per_page,
+                error_out=False
+            )
+            
+            # Prepare response with basic information
+            spaces = [{
+                'id': space.id,
+                'name': space.name,
+                'address': space.address,
+                'hourly_price': str(space.hourly_price),
+                'daily_price': str(space.daily_price),
+                'capacity': space.capacity,
+                'thumbnail': space.images[0].image_url if space.images else None
+            } for space in paginated_spaces.items]
+            
+            return {
+                'spaces': spaces,
+                'pagination': {
+                    'total_items': paginated_spaces.total,
+                    'total_pages': paginated_spaces.pages,
+                    'current_page': page,
+                    'per_page': per_page,
+                    'has_next': paginated_spaces.has_next,
+                    'has_prev': paginated_spaces.has_prev
+                }
+            }, 200
+        
+        except Exception as e:
+            return {'error': str(e)}, 500
+            
+    def get(self, space_id):
+        """
+        Get detailed information about a specific space
+        Including all images, amenities, rules, and availability
+        """
+        try:
+            space = Space.query.get(space_id)
+            
+            if not space:
+                return {'error': 'Space not found'}, 404
+                
+            if space.status != SpaceStatus.AVAILABLE:
+                return {'error': 'This space is not currently available'}, 400
+                
+            # Prepare detailed space information
+            space_details = {
+                'id': space.id,
+                'name': space.name,
+                'description': space.description,
+                'address': space.address,
+                'hourly_price': str(space.hourly_price),
+                'daily_price': str(space.daily_price),
+                'capacity': space.capacity,
+                'amenities': space.amenities,
+                'rules': space.rules,
+                'images': [image.image_url for image in space.images],
+                'created_at': space.created_at.isoformat(),
+                'updated_at': space.updated_at.isoformat() if space.updated_at else None,
+            }
+            
+            return space_details, 200
+            
+        except Exception as e:
+            return {'error': str(e)}, 500
+        
+class BookingResource(Resource):
+    @jwt_required()
+    def put(self, booking_id):
+        """Cancel an existing booking"""
+        try:
+            
+            
+            # Get the booking
+            booking = db.session.get(Booking, booking_id)
+            if not booking:
+                return {'error': 'Booking not found'}, 404
+                
+            
+                
+            # Check if booking can be cancelled
+            if booking.status == BookingStatus.CANCELLED:
+                return {'error': 'Booking is already cancelled'}, 400
+                
+            if booking.status == BookingStatus.COMPLETED:
+                return {'error': 'Cannot cancel a completed booking'}, 400
+                
+            # Check cancellation time policy (at least 24 hours notice)
+            if booking.start_time <= datetime.now() + timedelta(hours=24):
+                return {
+                    'error': 'Bookings must be cancelled at least 24 hours in advance'
+                }, 400
+                
+            # Get associated space
+            space = (booking.space_id)
+            if space:
+                # Reset space status to available if this was the current booking
+                if space.status == SpaceStatus.BOOKED:
+                    space.status = SpaceStatus.AVAILABLE
+            
+            # Update booking status
+            booking.status = BookingStatus.CANCELLED
+            booking.updated_at = datetime.now()
+            
+            # Save changes
+            db.session.commit()
+            
+            return {
+                'message': 'Booking cancelled successfully',
+                'booking_id': booking.id,
+                'status': BookingStatus.CANCELLED.value
+            }, 200
+            
+        except Exception as e:
+            db.session.rollback()
+            return {'error': str(e)}, 500
+    @jwt_required()
+    def post(self, space_id):
+        """Create a new booking for a space"""
+        try:
+            # Get current user
+            current_user_id = get_jwt_identity()
+            
+            # Validate request data
+            data = request.get_json()
+            if not all(key in data for key in ['start_time', 'end_time']):
+                return {'error': 'Start time and end time are required'}, 400
+            
+            # Parse datetime strings
+            try:
+                start_time = datetime.fromisoformat(data['start_time'])
+                end_time = datetime.fromisoformat(data['end_time'])
+            except ValueError:
+                return {'error': 'Invalid datetime format. Use ISO format (YYYY-MM-DDTHH:MM:SS)'}, 400
+            
+            # Validate booking time
+            if start_time >= end_time:
+                return {'error': 'End time must be after start time'}, 400
+            
+            if start_time < datetime.now():
+                return {'error': 'Cannot book in the past'}, 400
+            
+            # Get the space
+            space = db.session.get(Space, space_id)
+            if not space:
+                return {'error': 'Space not found'}, 404
+            
+            if space.status != SpaceStatus.AVAILABLE:
+                return {'error': 'Space is not available for booking'}, 400
+            
+            # Check for conflicting bookings
+            conflicting_booking = Booking.query.filter(
+                and_(
+                    Booking.space_id == space_id,
+                    Booking.status != BookingStatus.CANCELLED,
+                    or_(
+                        and_(
+                            Booking.start_time <= start_time,
+                            Booking.end_time > start_time
+                        ),
+                        and_(
+                            Booking.start_time < end_time,
+                            Booking.end_time >= end_time
+                        ),
+                        and_(
+                            Booking.start_time >= start_time,
+                            Booking.end_time <= end_time
+                        )
+                    )
+                )
+            ).first()
+            
+            if conflicting_booking:
+                return {'error': 'Space is already booked for this time period'}, 409
+            
+            # Calculate duration and amount
+            duration = end_time - start_time
+            hours = duration.total_seconds() / 3600
+            days = duration.days
+            
+            # Calculate total amount based on duration
+            total_price = Decimal('0.0')
+            if days >= 1:
+                # Calculate full days
+                total_price += Decimal(str(space.daily_price)) * Decimal(str(days))
+                # Calculate remaining hours
+                remaining_hours = (duration.total_seconds() % 86400) / 3600  # 86400 seconds in a day
+                if remaining_hours > 0:
+                    total_price += Decimal(str(space.hourly_price)) * Decimal(str(remaining_hours))
+            else:
+                # Calculate hourly rate
+                total_price = Decimal(str(space.hourly_price)) * Decimal(str(hours))
+            
+            # Create booking
+            new_booking = Booking(
+                client_id=current_user_id,
+                space_id=space_id,
+                start_time=start_time,
+                end_time=end_time,
+                total_price=total_price,
+                status=BookingStatus.PENDING
+            )
+            
+            # Update space status
+            space.status = SpaceStatus.BOOKED
+            
+            # Save to database
+            db.session.add(new_booking)
+            db.session.commit()
+            
+            return {
+                'message': 'Booking created successfully',
+                'booking_id': new_booking.id,
+                'total_price': str(total_price),
+                'start_time': start_time.isoformat(),
+                'end_time': end_time.isoformat(),
+                'duration': {
+                    'days': days,
+                    'hours': hours % 24,
+                    'total_hours': hours
+                },
+                'status': new_booking.status.value
+            }, 201
+            
+        except Exception as e:
+            db.session.rollback()
+            return {'error': str(e)}, 500
 
+    @jwt_required()
+    def get(self, booking_id=None):
+        """Get booking details or list of user's bookings"""
+        try:
+            current_user_id = get_jwt_identity()
+            
+            if booking_id:
+                # Get specific booking
+                booking = Booking.query.filter_by(
+                    id=booking_id,
+                    client_id=current_user_id
+                ).first()
+                
+                if not booking:
+                    return {'error': 'Booking not found'}, 404
+                
+                return {
+                    'id': booking.id,
+                    'space_id': booking.space_id,
+                    'start_time': booking.start_time.isoformat(),
+                    'end_time': booking.end_time.isoformat(),
+                    'total_price': str(booking.total_price),
+                    'status': booking.status.value,
+                    'space_name': booking.space.name,
+                    'space_address': booking.space.address
+                }, 200
+            
+            else:
+                # List all user's bookings with pagination
+                page = request.args.get('page', 1, type=int)
+                per_page = request.args.get('per_page', 10, type=int)
+                
+                bookings = Booking.query.filter_by(client_id=current_user_id)\
+                    .order_by(Booking.created_at.desc())\
+                    .paginate(page=page, per_page=per_page, error_out=False)
+                
+                return {
+                    'bookings': [{
+                        'id': b.id,
+                        'space_id': b.space_id,
+                        'space_name': b.space.name,
+                        'start_time': b.start_time.isoformat(),
+                        'end_time': b.end_time.isoformat(),
+                        'total_price': str(b.total_price),
+                        'status': b.status.value
+                    } for b in bookings.items],
+                    'pagination': {
+                        'total_items': bookings.total,
+                        'total_pages': bookings.pages,
+                        'current_page': page,
+                        'per_page': per_page,
+                        'has_next': bookings.has_next,
+                        'has_prev': bookings.has_prev
+                    }
+                }, 200
+                
+        except Exception as e:
+            return {'error': str(e)}, 500
 
+api.add_resource(BookingResource, '/spaces/<int:space_id>/book', '/bookings', '/bookings/<int:booking_id>', '/bookings/<int:booking_id>/cancel')
+api.add_resource(ClientSpaceResource,'/client/spaces', '/client/spaces/<int:space_id>')
 api.add_resource(SpaceResource, '/spaces', '/spaces/<int:space_id>')
 api.add_resource(Auth0Login, '/auth0/login')
 api.add_resource(Auth0Callback, '/auth0/callback')
