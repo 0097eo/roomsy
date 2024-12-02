@@ -15,6 +15,10 @@ from authlib.integrations.flask_client import OAuth
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy import func, and_, or_
 from decimal import Decimal
+import stripe
+
+
+stripe.api_key = os.getenv('STRIPE_SECRET_KEY')
 
 oauth = OAuth(app)
 auth0 = oauth.register(
@@ -649,35 +653,32 @@ class ClientSpaceResource(Resource):
         except Exception as e:
             return {'error': str(e)}, 500
         
+
 class BookingResource(Resource):
     @jwt_required()
     def put(self, booking_id):
         """Cancel an existing booking"""
         try:
-            
-            
             # Get the booking
             booking = db.session.get(Booking, booking_id)
             if not booking:
                 return {'error': 'Booking not found'}, 404
-                
             
-                
             # Check if booking can be cancelled
             if booking.status == BookingStatus.CANCELLED:
                 return {'error': 'Booking is already cancelled'}, 400
-                
+            
             if booking.status == BookingStatus.COMPLETED:
                 return {'error': 'Cannot cancel a completed booking'}, 400
-                
+            
             # Check cancellation time policy (at least 24 hours notice)
             if booking.start_time <= datetime.now() + timedelta(hours=24):
                 return {
                     'error': 'Bookings must be cancelled at least 24 hours in advance'
                 }, 400
-                
+            
             # Get associated space
-            space = (booking.space_id)
+            space = booking.space
             if space:
                 # Reset space status to available if this was the current booking
                 if space.status == SpaceStatus.BOOKED:
@@ -686,6 +687,22 @@ class BookingResource(Resource):
             # Update booking status
             booking.status = BookingStatus.CANCELLED
             booking.updated_at = datetime.now()
+            
+            # Attempt to refund the Stripe payment if it exists
+            if booking.stripe_payment_intent_id:
+                try:
+                    # Refund the payment if it was already charged
+                    if booking.stripe_charge_id:
+                        stripe.Refund.create(
+                            charge=booking.stripe_charge_id,
+                            reason='requested_by_customer'
+                        )
+                    else:
+                        # If payment intent hasn't been confirmed, cancel it
+                        stripe.PaymentIntent.cancel(booking.stripe_payment_intent_id)
+                except stripe.error.StripeError as e:
+                    # Log the error, but don't prevent cancellation
+                    print(f"Stripe refund error: {str(e)}")
             
             # Save changes
             db.session.commit()
@@ -699,9 +716,10 @@ class BookingResource(Resource):
         except Exception as e:
             db.session.rollback()
             return {'error': str(e)}, 500
+
     @jwt_required()
     def post(self, space_id):
-        """Create a new booking for a space"""
+        """Create a new booking for a space with Stripe payment integration"""
         try:
             # Get current user
             current_user_id = get_jwt_identity()
@@ -776,6 +794,25 @@ class BookingResource(Resource):
                 # Calculate hourly rate
                 total_price = Decimal(str(space.hourly_price)) * Decimal(str(hours))
             
+            # Convert total price to cents for Stripe
+            amount_in_cents = int(total_price * 100)
+            
+            # Create Stripe Payment Intent
+            try:
+                payment_intent = stripe.PaymentIntent.create(
+                    amount=amount_in_cents,
+                    currency='usd',
+                    payment_method_types=['card'],
+                    metadata={
+                        'space_id': space_id,
+                        'client_id': current_user_id,
+                        'start_time': start_time.isoformat(),
+                        'end_time': end_time.isoformat()
+                    }
+                )
+            except stripe.error.StripeError as e:
+                return {'error': f'Payment processing error: {str(e)}'}, 402
+            
             # Create booking
             new_booking = Booking(
                 client_id=current_user_id,
@@ -783,7 +820,8 @@ class BookingResource(Resource):
                 start_time=start_time,
                 end_time=end_time,
                 total_price=total_price,
-                status=BookingStatus.PENDING
+                status=BookingStatus.PENDING,
+                stripe_payment_intent_id=payment_intent.id
             )
             
             # Update space status
@@ -794,7 +832,7 @@ class BookingResource(Resource):
             db.session.commit()
             
             return {
-                'message': 'Booking created successfully',
+                'message': 'Booking initiated. Complete payment to confirm.',
                 'booking_id': new_booking.id,
                 'total_price': str(total_price),
                 'start_time': start_time.isoformat(),
@@ -804,7 +842,8 @@ class BookingResource(Resource):
                     'hours': hours % 24,
                     'total_hours': hours
                 },
-                'status': new_booking.status.value
+                'status': new_booking.status.value,
+                'stripe_client_secret': payment_intent.client_secret
             }, 201
             
         except Exception as e:
@@ -835,7 +874,8 @@ class BookingResource(Resource):
                     'total_price': str(booking.total_price),
                     'status': booking.status.value,
                     'space_name': booking.space.name,
-                    'space_address': booking.space.address
+                    'space_address': booking.space.address,
+                    'payment_status': booking.stripe_payment_status
                 }, 200
             
             else:
@@ -855,7 +895,8 @@ class BookingResource(Resource):
                         'start_time': b.start_time.isoformat(),
                         'end_time': b.end_time.isoformat(),
                         'total_price': str(b.total_price),
-                        'status': b.status.value
+                        'status': b.status.value,
+                        'payment_status': b.stripe_payment_status
                     } for b in bookings.items],
                     'pagination': {
                         'total_items': bookings.total,
@@ -870,7 +911,67 @@ class BookingResource(Resource):
         except Exception as e:
             return {'error': str(e)}, 500
 
+# Webhook endpoint to handle Stripe events
+class StripeWebhookResource(Resource):
+    def post(self):
+        """Handle Stripe webhook events"""
+        payload = request.get_data()
+        sig_header = request.headers.get('Stripe-Signature')
+
+        try:
+            event = stripe.Webhook.construct_event(
+                payload, sig_header, os.getenv('STRIPE_WEBHOOK_SECRET')
+            )
+        except ValueError:
+            # Invalid payload
+            return {'error': 'Invalid payload'}, 400
+        except stripe.error.SignatureVerificationError:
+            # Invalid signature
+            return {'error': 'Invalid signature'}, 400
+
+        # Handle different event types
+        if event.type == 'payment_intent.succeeded':
+            payment_intent = event.data.object
+            
+            # Find the booking associated with this payment intent
+            booking = Booking.query.filter_by(
+                stripe_payment_intent_id=payment_intent.id
+            ).first()
+            
+            if booking:
+                # Update booking status
+                booking.status = BookingStatus.CONFIRMED
+                booking.stripe_charge_id = payment_intent.charges.data[0].id
+                
+                # Ensure the space remains booked
+                if booking.space:
+                    booking.space.status = SpaceStatus.BOOKED
+                
+                db.session.commit()
+
+        elif event.type == 'payment_intent.payment_failed':
+            payment_intent = event.data.object
+            
+            # Find the booking associated with this payment intent
+            booking = Booking.query.filter_by(
+                stripe_payment_intent_id=payment_intent.id
+            ).first()
+            
+            if booking:
+                # Update booking status
+                booking.status = BookingStatus.CANCELLED
+                
+                # Release the space
+                if booking.space:
+                    booking.space.status = SpaceStatus.AVAILABLE
+                
+                db.session.commit()
+
+        return {'received': True}, 200
+
+# Add resources to API
 api.add_resource(BookingResource, '/spaces/<int:space_id>/book', '/bookings', '/bookings/<int:booking_id>', '/bookings/<int:booking_id>/cancel')
+api.add_resource(StripeWebhookResource, '/stripe-webhook')
 api.add_resource(ClientSpaceResource,'/client/spaces', '/client/spaces/<int:space_id>')
 api.add_resource(SpaceResource, '/spaces', '/spaces/<int:space_id>')
 api.add_resource(Auth0Login, '/auth0/login')

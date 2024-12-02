@@ -107,6 +107,9 @@ class Booking(db.Model):
     end_time = db.Column(db.DateTime, nullable=False)
     total_price = db.Column(db.Numeric(10, 2), nullable=False)
     status = db.Column(Enum(BookingStatus), default=BookingStatus.PENDING)
+    stripe_payment_intent_id = db.Column(db.String(255), nullable=True)
+    stripe_charge_id = db.Column(db.String(255), nullable=True)
+    stripe_payment_status = db.Column(db.String(50), nullable=True)
     created_at = db.Column(db.DateTime, default=func.now())
     updated_at = db.Column(db.DateTime, default=func.now(), onupdate=func.now())
 
