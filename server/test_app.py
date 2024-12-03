@@ -195,7 +195,7 @@ class TestSpaces:
 
     def test_get_spaces_pagination(self, client, admin_headers, sample_space):
         """Test getting list of spaces with pagination"""
-        response = client.get('/spaces?page=1&per_page=10', 
+        response = client.get('/spaces?page=1&per_page=8', 
                             headers=admin_headers)
         
         assert response.status_code == 200
@@ -207,7 +207,7 @@ class TestSpaces:
         # Verify pagination info
         pagination = json_data['pagination']
         assert pagination['current_page'] == 1
-        assert pagination['per_page'] == 10
+        assert pagination['per_page'] == 8
         assert pagination['total_items'] == 1
 
     def test_update_space(self, client, admin_headers, sample_space):
