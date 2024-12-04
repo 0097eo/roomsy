@@ -3,8 +3,8 @@ from email.mime.text import MIMEText
 import smtplib
 import re
 from flask_restful import Resource
-from flask import redirect, session, url_for, request
-from models import User, UserRole, Space, SpaceStatus, Booking, BookingStatus
+from flask import redirect, session, url_for, request, current_app
+from models import User, UserRole, Space, SpaceStatus, Booking, BookingStatus, SpaceImage
 from config import app, db, api
 import secrets
 import os
@@ -16,6 +16,12 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy import func, and_, or_
 from decimal import Decimal
 import stripe
+import cloudinary
+from cloudinary.utils import cloudinary_url
+from cloudinary.uploader import upload
+from functools import wraps
+import json
+import decimal
 
 
 stripe.api_key = os.getenv('STRIPE_SECRET_KEY')
@@ -84,6 +90,66 @@ def send_verification_email(email, verification_code):
     Roomsy Team
     '''
     send_email(email, subject, body)
+
+def configure_cloudinary():
+    """Configure Cloudinary with environment variables"""
+    try:
+        cloudinary.config(
+            cloud_name=os.getenv('CLOUDINARY_CLOUD_NAME'),
+            api_key=os.getenv('CLOUDINARY_API_KEY'),
+            api_secret=os.getenv('CLOUDINARY_API_SECRET')
+        )
+    except Exception as e:
+        print(f"Error configuring Cloudinary: {str(e)}")
+        raise
+
+def require_cloudinary(f):
+    """Decorator to ensure Cloudinary is configured before upload"""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if not all([
+            cloudinary.config().cloud_name,
+            cloudinary.config().api_key,
+            cloudinary.config().api_secret
+        ]):
+            configure_cloudinary()
+        return f(*args, **kwargs)
+    return decorated_function
+
+@require_cloudinary
+def upload_image_to_cloudinary(image_file):
+    """
+    Upload image to Cloudinary with error handling and retry logic
+    
+    Args:
+        image_file: File object from request.files
+    Returns:
+        str: Cloudinary secure URL of the uploaded image
+    Raises:
+        Exception: If upload fails after retries
+    """
+    max_retries = 3
+    retry_count = 0
+    
+    while retry_count < max_retries:
+        try:
+            result = cloudinary.uploader.upload(
+                image_file,
+                folder="charity_stories",
+                transformation={
+                    'width': 800,
+                    'height': 600,
+                    'crop': 'fill',
+                    'quality': 'auto:good'
+                }
+            )
+            return result['secure_url']
+        except Exception as e:
+            retry_count += 1
+            if retry_count == max_retries:
+                print(f"Failed to upload image after {max_retries} attempts: {str(e)}")
+                raise Exception("Failed to upload image to Cloudinary")
+            print(f"Upload attempt {retry_count} failed, retrying...")
 
 
 class Register(Resource):
@@ -229,7 +295,8 @@ class Login(Resource):
             return {
                 'access_token': access_token,
                 'user_id': user.id,
-                'role': user.role.value
+                'role': user.role.value,
+                'username': user.username
             }, 200
             
         except Exception as e:
@@ -340,13 +407,47 @@ class ProfileResource(Resource):
         return user.to_dict(), 200
     
 class SpaceResource(Resource):
+    ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif'}
+    MAX_FILE_SIZE = 5 * 1024 * 1024  # 5MB
+    
+    def allowed_file(self, filename):
+        return '.' in filename and \
+               filename.rsplit('.', 1)[1].lower() in self.ALLOWED_EXTENSIONS
+
+    def validate_file_size(self, file):
+        file.seek(0, 2)  # Seek to end of file
+        size = file.tell()  # Get current position (size)
+        file.seek(0)  # Reset file position
+        return size <= self.MAX_FILE_SIZE
+    
+
     @jwt_required()
-    def get(self):
+    def get(self, space_id=None):
         try:
+            # If space_id is provided, fetch a single space
+            if space_id:
+                space = Space.query.get(space_id)
+                if not space:
+                    return {'error': 'Space not found'}, 404
+                space_data = {
+                    'id': space.id,
+                    'name': space.name,
+                    'description': space.description,
+                    'address': space.address,
+                    'status': space.status.value,
+                    'hourly_price': str(space.hourly_price),
+                    'daily_price': str(space.daily_price),
+                    'capacity': space.capacity,
+                    'amenities': space.amenities,
+                    'rules': space.rules,
+                    'images': [image.image_url for image in space.images]
+                }
+                return space_data, 200
+
             # Get query parameters
             status = request.args.get('status')
             page = request.args.get('page', 1, type=int)
-            per_page = request.args.get('per_page', 10, type=int)
+            per_page = request.args.get('per_page', 8, type=int)
             search = request.args.get('search', '')
 
             # Get current user's type from JWT claims
@@ -421,6 +522,7 @@ class SpaceResource(Resource):
 
         except Exception as e:
             return {'error': str(e)}, 500
+
         
     @jwt_required()
     def post(self):
@@ -432,28 +534,82 @@ class SpaceResource(Resource):
             if not current_user:
                 return {'error': 'User not found'}, 404
             
-            if current_user.role != UserRole.ADMIN or current_user.role != UserRole.OWNER:
-                return {'error': 'Only admins can create spaces'}, 403
+            if current_user.role not in [UserRole.ADMIN, UserRole.OWNER]:
+                return {'error': 'Only admins and owners can create spaces'}, 403
             
-            data = request.get_json()
+            if request.is_json:
+                data = request.get_json()
+            else:
+                data = request.form.to_dict()
 
             required_fields = ['name', 'description', 'address', 'capacity', 'hourly_price', 'daily_price', 'status', 'amenities', 'rules']
             for field in required_fields:
                 if field not in data:
                     return {'error': f'{field} is required'}, 400
+                
+            # Handle image upload with improved validation
+            image_url = None
+            if 'image' in request.files:
+                image_file = request.files['image']
+                if image_file.filename == '':
+                    return {'error': 'No selected file'}, 400
+                    
+                if not self.allowed_file(image_file.filename):
+                    return {
+                        'error': f'Invalid file type. Allowed types: {", ".join(self.ALLOWED_EXTENSIONS)}'
+                    }, 400
+                    
+                if not self.validate_file_size(image_file):
+                    return {
+                        'error': f'File size exceeds maximum limit of {self.MAX_FILE_SIZE/1024/1024}MB'
+                    }, 400
+                
+                try:
+                    image_url = upload_image_to_cloudinary(image_file)
+                except Exception as e:
+                    return {"error": f"Image upload failed: {str(e)}"}, 500
+                
+            try:
+                amenities = json.loads(data['amenities']) if isinstance(data['amenities'], str) else data['amenities']
+                rules = json.loads(data['rules']) if isinstance(data['rules'], str) else data['rules']
+            except json.JSONDecodeError:
+                return {'error': 'Invalid JSON for amenities or rules'}, 400
 
             new_space = Space(
-                owner_id=current_user.id,
+                 owner_id=current_user.id,
                 name=data['name'],
                 description=data['description'],
                 address=data['address'],
-                capacity=data['capacity'],
-                hourly_price=data['hourly_price'],
-                daily_price=data['daily_price'],
+                capacity=int(data['capacity']),
+                hourly_price=decimal.Decimal(data['hourly_price']),
+                daily_price=decimal.Decimal(data['daily_price']),
                 status=SpaceStatus[data['status']],
-                amenities=data['amenities'],
-                rules=data['rules']
+                amenities=amenities,
+                rules=rules,
+                images=image_url
             )
+            
+            #Handling multiple images
+            if 'images' in request.files:
+                space_images = []
+                for img in request.files.getlist('images'):
+                    if img and self.allowed_file(img.filename) and self.validate_file_size(img):
+                        try:
+                            img_url = self.upload_image_to_cloudinary(img)
+                            space_image = SpaceImage(
+                                space_id=new_space.id,
+                                image_url=img_url,
+                                is_primary=(len(space_images) == 0)
+                            )
+                            space_images.append(space_image)
+                        except Exception as e:
+                            # Log the error but continue processing other images
+                            current_app.logger.error(f"Image upload failed: {str(e)}")
+                
+                # Add additional images to the session
+                if space_images:
+                    db.session.add_all(space_images)
+
             db.session.add(new_space)
             db.session.commit()
 
