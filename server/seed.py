@@ -2,7 +2,7 @@ from faker import Faker
 import random
 from datetime import datetime, timedelta
 from decimal import Decimal
-from models import db, User, Space, SpaceImage, Booking, Payment, UserRole, SpaceStatus, BookingStatus
+from models import db, User, Space, Booking, Payment, UserRole, SpaceStatus, BookingStatus
 import cloudinary
 import cloudinary.uploader
 from dotenv import load_dotenv
@@ -141,6 +141,14 @@ def create_spaces(users, num_spaces=30):
         rules = random.sample(rules_options, random.randint(2, 5))
         space_type = random.choice(space_types)
         
+        # Generate 3-5 images for each space
+        space_images = []
+        num_images = random.randint(3, 5)
+        for _ in range(num_images):
+            image_url = generate_image_url()
+            if image_url:
+                space_images.append(image_url)
+        
         space = Space(
             owner_id=owner.id,
             name=f"{fake.company()} {space_type}",
@@ -151,7 +159,8 @@ def create_spaces(users, num_spaces=30):
             daily_price=Decimal(str(random.uniform(80.0, 800.0))).quantize(Decimal('0.01')),
             status=random.choice(list(SpaceStatus)),
             amenities=amenities,
-            rules=rules
+            rules=rules,
+            images=space_images
         )
         spaces.append(space)
     
@@ -160,28 +169,6 @@ def create_spaces(users, num_spaces=30):
     print(f"✅ Created {len(spaces)} spaces")
     return spaces
 
-
-def create_space_images(spaces):
-    """Create sample images for each space"""
-    print("🖼️ Creating space images...")
-    images = []
-    
-    for space in spaces:
-        num_images = random.randint(3, 5)
-        for i in range(num_images):
-            image_url = generate_image_url()
-            if image_url:
-                image = SpaceImage(
-                    space_id=space.id,
-                    image_url=image_url,
-                    is_primary=(i == 0)
-                )
-                images.append(image)
-    
-    db.session.add_all(images)
-    db.session.commit()
-    print(f"✅ Created {len(images)} space images")
-    return images
 
 def create_bookings(users, spaces, num_bookings=100):
     """Create sample bookings and payments"""
@@ -257,7 +244,6 @@ def seed_database():
         # Create data in the correct order
         users = create_users(num_users=20)
         spaces = create_spaces(users, num_spaces=30)
-        images = create_space_images(spaces)
         bookings, payments = create_bookings(users, spaces, num_bookings=100)
         
         print("🌟 Database seeding completed successfully!")

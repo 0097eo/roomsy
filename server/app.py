@@ -4,7 +4,7 @@ import smtplib
 import re
 from flask_restful import Resource
 from flask import redirect, session, url_for, request, current_app
-from models import User, UserRole, Space, SpaceStatus, Booking, BookingStatus, SpaceImage
+from models import User, UserRole, Space, SpaceStatus, Booking, BookingStatus
 from config import app, db, api
 import secrets
 import os
@@ -440,7 +440,7 @@ class SpaceResource(Resource):
                     'capacity': space.capacity,
                     'amenities': space.amenities,
                     'rules': space.rules,
-                    'images': [image.image_url for image in space.images]
+                    'images': space.images or []  # Use the JSON images list directly
                 }
                 return space_data, 200
 
@@ -504,7 +504,7 @@ class SpaceResource(Resource):
                     'capacity': space.capacity,
                     'amenities': space.amenities,
                     'rules': space.rules,
-                    'images': [image.image_url for image in space.images]
+                    'images': space.images or []  # Use the JSON images list directly
                 }
                 spaces.append(space_data)
 
@@ -547,28 +547,38 @@ class SpaceResource(Resource):
                 if field not in data:
                     return {'error': f'{field} is required'}, 400
                 
-            # Handle image upload with improved validation
-            image_url = None
+            # Handling multiple image uploads
+            space_images = []
+            if 'images' in request.files:
+                for img in request.files.getlist('images'):
+                    if img and self.allowed_file(img.filename) and self.validate_file_size(img):
+                        try:
+                            img_url = upload_image_to_cloudinary(img)
+                            space_images.append(img_url)
+                        except Exception as e:
+                            # Log the error but continue processing other images
+                            current_app.logger.error(f"Image upload failed: {str(e)}")
+            
+            # Handle single image upload for backwards compatibility
             if 'image' in request.files:
                 image_file = request.files['image']
-                if image_file.filename == '':
-                    return {'error': 'No selected file'}, 400
+                if image_file.filename != '':
+                    if not self.allowed_file(image_file.filename):
+                        return {
+                            'error': f'Invalid file type. Allowed types: {", ".join(self.ALLOWED_EXTENSIONS)}'
+                        }, 400
                     
-                if not self.allowed_file(image_file.filename):
-                    return {
-                        'error': f'Invalid file type. Allowed types: {", ".join(self.ALLOWED_EXTENSIONS)}'
-                    }, 400
+                    if not self.validate_file_size(image_file):
+                        return {
+                            'error': f'File size exceeds maximum limit of {self.MAX_FILE_SIZE/1024/1024}MB'
+                        }, 400
                     
-                if not self.validate_file_size(image_file):
-                    return {
-                        'error': f'File size exceeds maximum limit of {self.MAX_FILE_SIZE/1024/1024}MB'
-                    }, 400
-                
-                try:
-                    image_url = upload_image_to_cloudinary(image_file)
-                except Exception as e:
-                    return {"error": f"Image upload failed: {str(e)}"}, 500
-                
+                    try:
+                        image_url = upload_image_to_cloudinary(image_file)
+                        space_images.append(image_url)
+                    except Exception as e:
+                        return {"error": f"Image upload failed: {str(e)}"}, 500
+
             try:
                 amenities = json.loads(data['amenities']) if isinstance(data['amenities'], str) else data['amenities']
                 rules = json.loads(data['rules']) if isinstance(data['rules'], str) else data['rules']
@@ -576,7 +586,7 @@ class SpaceResource(Resource):
                 return {'error': 'Invalid JSON for amenities or rules'}, 400
 
             new_space = Space(
-                 owner_id=current_user.id,
+                owner_id=current_user.id,
                 name=data['name'],
                 description=data['description'],
                 address=data['address'],
@@ -586,29 +596,8 @@ class SpaceResource(Resource):
                 status=SpaceStatus[data['status']],
                 amenities=amenities,
                 rules=rules,
-                images=image_url
+                images=space_images  # Store the list of image URLs
             )
-            
-            #Handling multiple images
-            if 'images' in request.files:
-                space_images = []
-                for img in request.files.getlist('images'):
-                    if img and self.allowed_file(img.filename) and self.validate_file_size(img):
-                        try:
-                            img_url = self.upload_image_to_cloudinary(img)
-                            space_image = SpaceImage(
-                                space_id=new_space.id,
-                                image_url=img_url,
-                                is_primary=(len(space_images) == 0)
-                            )
-                            space_images.append(space_image)
-                        except Exception as e:
-                            # Log the error but continue processing other images
-                            current_app.logger.error(f"Image upload failed: {str(e)}")
-                
-                # Add additional images to the session
-                if space_images:
-                    db.session.add_all(space_images)
 
             db.session.add(new_space)
             db.session.commit()

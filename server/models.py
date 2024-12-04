@@ -74,28 +74,18 @@ class Space(db.Model):
     status = db.Column(Enum(SpaceStatus), default=SpaceStatus.AVAILABLE)
     amenities = db.Column(db.JSON) 
     rules = db.Column(db.JSON)
+    images = db.Column(db.JSON)
     created_at = db.Column(db.DateTime, default=func.now())
     updated_at = db.Column(db.DateTime, default=func.now(), onupdate=func.now())
 
      # Relationships
     bookings = db.relationship('Booking', backref='space', lazy=True, cascade='all, delete-orphan')
-    images = db.relationship('SpaceImage', backref='space', lazy=True, cascade='all, delete-orphan')
     
     @validates('hourly_rate', 'daily_rate')
     def validate_rates(self, key, value):
         if value <= 0:
             raise ValueError(f'{key} must be greater than 0')
         return value
-
-class SpaceImage(db.Model):
-    __tablename__ = 'space_images'
-
-    id = db.Column(db.Integer, primary_key=True)
-    space_id = db.Column(db.Integer, db.ForeignKey('spaces.id'), nullable=False)
-    image_url = db.Column(db.String(255), nullable=False)
-    is_primary = db.Column(db.Boolean, default=False)
-    created_at = db.Column(db.DateTime, default=func.now())
-
 
 class Booking(db.Model):
     __tablename__ = 'bookings'
