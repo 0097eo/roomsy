@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
-
+import Footer from "../components/Footer";
 
 const SignUpPage = () => {
     const navigate = useNavigate()
@@ -44,12 +44,13 @@ const SignUpPage = () => {
             setError(data.message || 'Registration failed');
           }
         } catch (err) {
-          setError('Network error. Please try again later.');
+          setError('Network error. Please try again later.' + err.message);
         } finally {
           setLoading(false);
         }
       };
       return (
+        <>
         <div className="min-h-screen flex">
           <div className="w-1/2 bg-gray-600">
             <img
@@ -149,6 +150,8 @@ const SignUpPage = () => {
             </div>
           </div>
         </div>
+          <Footer />
+        </>
       );
 
 }

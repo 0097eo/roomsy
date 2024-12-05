@@ -1,6 +1,7 @@
-import React, { useState } from "react";
+import { useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
-import { useAuth } from "../context/AuthContext"; 
+import { useAuth } from "../context/AuthContext";
+import Footer from "../components/Footer";
 
 const LoginPage = () => {
     const navigate = useNavigate();
@@ -70,6 +71,7 @@ const LoginPage = () => {
     };
 
     return (
+        <>
         <div className="min-h-screen flex">
             <div className="w-1/2 bg-gray-600">
                 <img
@@ -158,6 +160,8 @@ const LoginPage = () => {
                 </div>
             </div>
         </div>
+            <Footer />
+            </>
     );
 }
 
