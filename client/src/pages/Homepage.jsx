@@ -1,7 +1,8 @@
 import { Link } from "react-router-dom";
-
+import Footer from "../components/Footer";
 const Homepage = () => {
     return (
+        <>
         <div className="min-h-screen flex">
             {/* Left Section: Hero Image */}
             <div className="w-1/2 bg-gray-600">
@@ -54,6 +55,8 @@ const Homepage = () => {
                 </div>
             </div>
         </div>
+            <Footer />
+            </>
     );
 };
 
