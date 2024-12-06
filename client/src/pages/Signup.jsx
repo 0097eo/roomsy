@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
+import { Eye, EyeOff } from "lucide-react";
 import Footer from "../components/Footer";
 
 const SignUpPage = () => {
@@ -12,6 +13,10 @@ const SignUpPage = () => {
     })
     const [error, setError] = useState(null)
     const [loading, setLoading] = useState(null)
+    const [showPassword, setShowPassword] = useState({
+        password: false,
+        confirmPassword: false
+    })
 
     const handleChange = (e) => {
         const { name, value } = e.target;
@@ -19,9 +24,16 @@ const SignUpPage = () => {
           ...prev,
           [name]: value
         }));
-      };
+    };
 
-      const handleSubmit = async (e) => {
+    const togglePasswordVisibility = (field) => {
+        setShowPassword(prev => ({
+            ...prev,
+            [field]: !prev[field]
+        }));
+    };
+
+    const handleSubmit = async (e) => {
         e.preventDefault();
         setError('');
         setLoading(true);
@@ -48,8 +60,9 @@ const SignUpPage = () => {
         } finally {
           setLoading(false);
         }
-      };
-      return (
+    };
+
+    return (
         <>
         <div className="min-h-screen flex">
           <div className="w-1/2 bg-gray-600">
@@ -116,15 +129,59 @@ const SignUpPage = () => {
                   >
                     Password
                   </label>
-                  <input
-                    type="password"
-                    id="password"
-                    name="password"
-                    value={formData.password}
-                    onChange={handleChange}
-                    required
-                    className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                  />
+                  <div className="relative">
+                    <input
+                      type={showPassword.password ? "text" : "password"}
+                      id="password"
+                      name="password"
+                      value={formData.password}
+                      onChange={handleChange}
+                      required
+                      className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500 pr-10"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => togglePasswordVisibility('password')}
+                      className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-500 hover:text-gray-700"
+                    >
+                      {showPassword.password ? (
+                        <EyeOff className="h-5 w-5" />
+                      ) : (
+                        <Eye className="h-5 w-5" />
+                      )}
+                    </button>
+                  </div>
+                </div>
+    
+                <div>
+                  <label 
+                    htmlFor="confirmPassword" 
+                    className="block text-sm font-medium text-gray-700"
+                  >
+                    Confirm Password
+                  </label>
+                  <div className="relative">
+                    <input
+                      type={showPassword.confirmPassword ? "text" : "password"}
+                      id="confirmPassword"
+                      name="confirmPassword"
+                      value={formData.confirmPassword}
+                      onChange={handleChange}
+                      required
+                      className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500 pr-10"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => togglePasswordVisibility('confirmPassword')}
+                      className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-500 hover:text-gray-700"
+                    >
+                      {showPassword.confirmPassword ? (
+                        <EyeOff className="h-5 w-5" />
+                      ) : (
+                        <Eye className="h-5 w-5" />
+                      )}
+                    </button>
+                  </div>
                 </div>
     
                 <div>
@@ -153,7 +210,6 @@ const SignUpPage = () => {
           <Footer />
         </>
       );
-
 }
 
 export default SignUpPage;
