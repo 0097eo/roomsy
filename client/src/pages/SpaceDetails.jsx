@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import Navbar from '../components/NavBar';
 import Slider from 'react-slick';
@@ -7,16 +7,30 @@ import { Share2, Instagram, Mail, X, Phone, Copy } from 'lucide-react';
 import 'slick-carousel/slick/slick.css';
 import 'slick-carousel/slick/slick-theme.css';
 import Footer from '../components/Footer';
+import { loadStripe } from '@stripe/stripe-js';
+import { Elements, CardElement, useStripe, useElements } from '@stripe/react-stripe-js';
+
+//placeholder Stripe publishable key
+const stripePromise = loadStripe('pk_test_51NE6IvDIBn8bHgYOZX4OodROekrijUm8OHXK9jdB7a2wJlOcNyA9o3OGCnRKSqJOa4Bo0Zg44s14NffMH4SdM0rg00YLtVmrQv');
 
 const SpaceDetailsPage = () => {
   const { id } = useParams();
   const { user } = useAuth();
-  const navigate = useNavigate();
   const [space, setSpace] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [selectedImage, setSelectedImage] = useState(null);
   const [showShareOptions, setShowShareOptions] = useState(false);
+  const [showBookingModal, setShowBookingModal] = useState(false);
+  const [bookingDetails, setBookingDetails] = useState({
+    date: '',
+    time: '',
+    duration: '1',
+    start_time: '',
+    end_time: '',
+  });
+  const [bookingError, setBookingError] = useState(null);
+  const [paymentClientSecret, setPaymentClientSecret] = useState(null);
 
   useEffect(() => {
     const fetchSpaceDetails = async () => {
@@ -49,6 +63,195 @@ const SpaceDetailsPage = () => {
 
   const closeModal = () => {
     setSelectedImage(null);
+  };
+
+  const handleBookNow = () => {
+    setShowBookingModal(true);
+    setBookingError(null);
+  }
+
+  const handleBookingInputChange = (event) => {
+    const { name, value } = event.target;
+    
+    setBookingDetails(prevDetails => {
+      let updatedDetails = { ...prevDetails, [name]: value };
+      
+      // If both date and time are set, create start_time
+      if (updatedDetails.date && updatedDetails.time) {
+        updatedDetails.start_time = `${updatedDetails.date}T${updatedDetails.time}:00`;
+        
+        // Calculate end time based on duration
+        const startTime = new Date(updatedDetails.start_time);
+        const duration = parseInt(updatedDetails.duration || '1', 10);
+        const endTime = new Date(startTime.getTime() + duration * 3600000);
+        updatedDetails.end_time = endTime.toISOString();
+      }
+      
+      return updatedDetails;
+    });
+  };
+
+  const BookingForm = () => {
+    const stripe = useStripe();
+    const elements = useElements();
+
+    const handleBookingSubmit = async (e) => {
+      e.preventDefault();
+      setBookingError(null);
+
+      try {
+        // First, create booking and get payment intent
+        const bookingResponse = await fetch(`/api/spaces/${id}/book`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${user.token}`,
+          },
+          body: JSON.stringify({
+            start_time: bookingDetails.start_time,
+            end_time: bookingDetails.end_time,
+          }),
+        });
+
+        const bookingData = await bookingResponse.json();
+
+        if (!bookingResponse.ok) {
+          throw new Error(bookingData.error || 'Failed to initiate booking');
+        }
+
+        // Set payment client secret
+        setPaymentClientSecret(bookingData.stripe_client_secret);
+
+        // Confirm payment
+        if (stripe && elements) {
+          const result = await stripe.confirmCardPayment(bookingData.stripe_client_secret, {
+            payment_method: {
+              card: elements.getElement(CardElement),
+              billing_details: {
+                name: user.name,
+                email: user.email,
+              },
+            },
+          });
+
+          if (result.error) {
+            // Payment failed
+            throw new Error(result.error.message);
+          } else if (result.paymentIntent.status === 'succeeded') {
+            // Payment successful
+            alert('Booking confirmed!');
+            setShowBookingModal(false);
+          }
+        }
+      } catch (err) {
+        setBookingError(err.message);
+        console.error('Booking error:', err);
+      }
+    };
+
+    return (
+      <form onSubmit={handleBookingSubmit}>
+        {bookingError && (
+          <div className="mb-4 text-red-500 text-sm">
+            {bookingError}
+          </div>
+        )}
+        <div className="mb-4">
+          <label htmlFor="date" className="block text-gray-700">
+            Date
+          </label>
+          <input
+            type="date"
+            id="date"
+            name="date"
+            value={bookingDetails.date}
+            onChange={handleBookingInputChange}
+            className="w-full px-3 py-2 border rounded-lg"
+            required
+            min={new Date().toISOString().split('T')[0]} // Prevent booking past dates
+          />
+        </div>
+        <div className="mb-4">
+          <label htmlFor="time" className="block text-gray-700">
+            Time
+          </label>
+          <input
+            type="time"
+            id="time"
+            name="time"
+            value={bookingDetails.time}
+            onChange={handleBookingInputChange}
+            className="w-full px-3 py-2 border rounded-lg"
+            required
+          />
+        </div>
+        <div className="mb-4">
+          <label htmlFor="duration" className="block text-gray-700">
+            Duration (hours)
+          </label>
+          <input
+            type="number"
+            id="duration"
+            name="duration"
+            defaultValue="1"
+            value={bookingDetails.duration}
+            onChange={handleBookingInputChange}
+            className="w-full px-3 py-2 border rounded-lg"
+            min="1"
+            required
+          />
+        </div>
+        {paymentClientSecret && (
+          <div className="mb-4">
+            <label className="block text-gray-700 mb-2">
+              Payment Details
+            </label>
+            <CardElement 
+              options={{
+                style: {
+                  base: {
+                    fontSize: '16px',
+                    color: '#424770',
+                    '::placeholder': {
+                      color: '#aab7c4',
+                    },
+                  },
+                  invalid: {
+                    color: '#9e2146',
+                  },
+                },
+              }}
+            />
+          </div>
+        )}
+        <button
+          type="submit"
+          className="w-full bg-blue-500 text-white px-4 py-2 rounded-lg"
+          disabled={!bookingDetails.start_time || !bookingDetails.end_time}
+        >
+          {paymentClientSecret ? 'Complete Payment' : 'Check Availability'}
+        </button>
+      </form>
+    );
+  };
+
+  const BookingModal = () => {
+    return showBookingModal ? (
+      <div className="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center z-50">
+        <div className="bg-white rounded-lg shadow-lg p-6 max-w-md w-full relative">
+          <button
+            className="absolute top-4 right-4 text-gray-500 hover:text-gray-800"
+            onClick={() => setShowBookingModal(false)}
+          >
+            <X size={24} />
+          </button>
+          <h3 className="text-lg font-bold mb-4">Book Space</h3>
+          <Elements stripe={stripePromise}>
+            <BookingForm />
+          </Elements>
+        </div>
+      </div>
+    ) : null;
   };
 
   const shareContent = {
@@ -120,9 +323,6 @@ const SpaceDetailsPage = () => {
     autoplaySpeed: 3000,
   };
 
-  const handleBookNow = () => {
-    navigate(`/book/${id}`);
-  };
 
   // Check if booking is disabled
   const isBookingDisabled = space?.status?.toLowerCase() === 'booked' || 
@@ -296,6 +496,8 @@ const SpaceDetailsPage = () => {
           </div>
         </div>
       )}
+
+      <BookingModal />
       <Footer />
     </div>
   );
