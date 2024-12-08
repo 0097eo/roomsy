@@ -78,7 +78,7 @@ const SpaceDetailsPage = () => {
       
       // If both date and time are set, create start_time
       if (updatedDetails.date && updatedDetails.time) {
-        updatedDetails.start_time = `${updatedDetails.date}T${updatedDetails.time}:00`;
+        updatedDetails.start_time = `${updatedDetails.date}T${updatedDetails.time}:00Z`;
         
         // Calculate end time based on duration
         const startTime = new Date(updatedDetails.start_time);

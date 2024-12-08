@@ -9,7 +9,7 @@ from config import app, db, api
 import secrets
 import os
 import requests
-from datetime import timedelta, datetime
+from datetime import timedelta, datetime, timezone
 from flask_jwt_extended import create_access_token, jwt_required, get_jwt_identity
 from authlib.integrations.flask_client import OAuth
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
@@ -403,6 +403,7 @@ class ProfileResource(Resource):
         
         if not user:
             return {'error': 'User not found'}, 404
+        
         
         return user.to_dict(), 200
     
@@ -878,14 +879,21 @@ class BookingResource(Resource):
             try:
                 start_time = datetime.fromisoformat(data['start_time'])
                 end_time = datetime.fromisoformat(data['end_time'])
+
+                #ensure the datetime objects are timezone aware
+                if start_time.tzinfo is None:
+                    start_time = start_time.replace(tzinfo=timezone.utc)
+                if end_time.tzinfo is None:
+                    end_time = end_time.replace(tzinfo=timezone.utc)
             except ValueError:
                 return {'error': 'Invalid datetime format. Use ISO format (YYYY-MM-DDTHH:MM:SS)'}, 400
             
             # Validate booking time
+            now = datetime.now(timezone.utc)
             if start_time >= end_time:
                 return {'error': 'End time must be after start time'}, 400
             
-            if start_time < datetime.now():
+            if start_time < now:
                 return {'error': 'Cannot book in the past'}, 400
             
             # Get the space
