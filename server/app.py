@@ -397,15 +397,53 @@ class Auth0Logout(Resource):
 class ProfileResource(Resource):
     @jwt_required()
     def get(self):
-        """Get current user profile"""
+        """Get current user profile with associated spaces and bookings"""
         current_user_id = get_jwt_identity()
-        user = User.query.get(current_user_id)
+        
+        user = db.session.get(User, current_user_id)
         
         if not user:
             return {'error': 'User not found'}, 404
+
+        user_spaces = [
+            {
+                'id': space.id,
+                'name': space.name,
+                'description': space.description,
+                'hourly_price': float(space.hourly_price),
+                'daily_price': float(space.daily_price),
+                'created_at': space.created_at.isoformat(),
+                'updated_at': space.updated_at.isoformat(),
+            }
+            for space in user.spaces
+        ]
+
+        user_bookings = [
+            {
+                'id': booking.id,
+                'space_id': booking.space.id,
+                'space_name': booking.space.name,
+                'start_time': booking.start_time.isoformat(),
+                'end_time': booking.end_time.isoformat(),
+                'status': booking.status.value,
+                'created_at': booking.created_at.isoformat(),
+            }
+            for booking in user.bookings
+        ]
+
+        profile = {
+            'id': user.id,
+            'email': user.email,
+            'username': user.username,
+            'role': user.role.value,
+            'created_at': user.created_at.isoformat(),
+            'updated_at': user.updated_at.isoformat(),
+            'spaces': user_spaces,
+            'bookings': user_bookings,
+        }
         
-        
-        return user.to_dict(), 200
+        return profile, 200
+
     
 class SpaceResource(Resource):
     ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif'}
