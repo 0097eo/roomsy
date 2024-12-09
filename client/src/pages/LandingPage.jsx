@@ -6,14 +6,13 @@ import { Pencil, ImagePlus, X } from "lucide-react";
 import Footer from '../components/Footer';
 
 const LandingPage = () => {
-  const { user, isAuthenticated } = useAuth();
+  const { user, isAuthenticated, loading } = useAuth();
   const navigate = useNavigate();
   const [spaces, setSpaces] = useState([]);
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
-  const [loading, setLoading] = useState(false);
+  const [fetchLoading, setFetchLoading] = useState(false);
   const [error, setError] = useState(null);
-
   const [filters, setFilters] = useState({
     search: '',
     status: '',
@@ -219,14 +218,16 @@ const LandingPage = () => {
   };
 
   useEffect(() => {
-    if (!isAuthenticated) {
+    if (!loading && !isAuthenticated) {
       navigate('/login');
     }
-  }, [isAuthenticated, navigate]);
+  }, [loading, isAuthenticated, navigate]);
 
   useEffect(() => {
     const fetchSpaces = async () => {
-      setLoading(true);
+      if (loading || !user?.token) return;
+
+      setFetchLoading(true);
       setError(null);
       try {
         const queryParams = new URLSearchParams({
@@ -262,12 +263,12 @@ const LandingPage = () => {
       } catch (err) {
         setError(err.message);
       } finally {
-        setLoading(false);
+        setFetchLoading(false);
       }
     };
 
     fetchSpaces();
-  }, [filters, page, perPage, user.token]);
+  }, [filters, page, perPage, user?.token, loading]);
 
   const handleFilterChange = (e) => {
     const { name, value } = e.target;
@@ -291,6 +292,11 @@ const LandingPage = () => {
   const handleSpaceClick = (id) => {
     navigate(`/spaces/${id}`);
   };
+
+  // Loading state while checking authentication
+  if (loading) {
+    return <div className="flex justify-center items-center h-screen">Loading...</div>;
+  }
 
   return (
     <div className="bg-white min-h-screen">
@@ -356,7 +362,7 @@ const LandingPage = () => {
           </div>
         </div>
 
-        {loading ? (
+        {fetchLoading ? (
           <div className="text-center py-8">Loading spaces...</div>
         ) : error ? (
           <div className="text-center text-red-500 py-8">{error}</div>
@@ -607,7 +613,7 @@ const LandingPage = () => {
         </div>
       </div>
     )}
-<Footer/>
+    <Footer/>
     </div>
   );
 };
