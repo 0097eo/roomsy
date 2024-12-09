@@ -3,14 +3,16 @@ import { NavLink, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { Menu, X, LogOut, User } from "lucide-react";
 import PropTypes from "prop-types";
+import { PartyPopper } from 'lucide-react';
 
 // Logo Component
 const Logo = () => (
-  <div className="text-2xl font-bold text-white tracking-wider cursor-pointer transition-colors hover:text-gray-300">
+  <div className="text-2xl font-bold text-white tracking-wider cursor-pointer transition-colors hover:text-gray-300 flex items-center">
     <span className="font-bold text-xl">
       <span className="text-blue-500">Room</span>
       <span className="text-white">Sy</span>
     </span>
+    <PartyPopper className="text-orange-500 ml-2" size={20} />
   </div>
 );
 
