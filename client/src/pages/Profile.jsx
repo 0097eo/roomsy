@@ -48,7 +48,6 @@ const ProfilePage = () => {
 
   const handleLogout = () => {
     logout();
-    // Redirect to login page or home page
     window.location.href = '/login';
   };
 
@@ -174,7 +173,7 @@ const ProfilePage = () => {
     <Navbar />
     <div className="flex min-h-screen bg-gray-100">
       {/* Sidebar */}
-      <div className="w-64 bg-white shadow-md">
+      <div className="fixed left-0 top-16 bottom-0 w-64 bg-white shadow-md overflow-y-auto">
         <div className="p-6 border-b flex items-center">
           <h1 className="text-xl font-bold text-gray-800">Hello, {user?.username}</h1>
         </div>
@@ -214,9 +213,6 @@ const ProfilePage = () => {
               </button>
             </li>
             <li>
-              
-            </li>
-            <li>
               <button 
                 onClick={handleLogout}
                 className="w-full flex items-center p-3 rounded-lg hover:bg-red-100 hover:text-red-800"
@@ -228,8 +224,8 @@ const ProfilePage = () => {
         </nav>
       </div>
 
-      {/* Main Content Area */}
-      <div className="flex-1 p-10">
+      {/* Main Content Area - Scrollable with Left Margin */}
+      <div className="flex-1 ml-64 p-10 overflow-y-auto">
         {activeSection === 'profile' && renderProfileDetails()}
         {activeSection === 'spaces' && renderSpaces()}
         {activeSection === 'bookings' && renderBookings()}
