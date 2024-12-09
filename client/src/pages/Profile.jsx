@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { User as UserIcon, Home as HomeIcon, Calendar as CalendarIcon, LogOut as LogOutIcon } from 'lucide-react';
+import { User as UserIcon, Home as HomeIcon, Calendar as CalendarIcon, LogOut as LogOutIcon, Menu as MenuIcon, X as CloseIcon } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import Navbar from '../components/NavBar';
 import Footer from '../components/Footer';
@@ -9,6 +9,7 @@ const ProfilePage = () => {
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   const { user, logout } = useAuth();
 
@@ -51,6 +52,10 @@ const ProfilePage = () => {
     window.location.href = '/login';
   };
 
+  const toggleMobileMenu = () => {
+    setIsMobileMenuOpen(!isMobileMenuOpen);
+  };
+
   const renderProfileDetails = () => (
     <div className="p-6 bg-white rounded-lg shadow-md">
       <h2 className="text-2xl font-bold mb-4 flex items-center">
@@ -58,22 +63,18 @@ const ProfilePage = () => {
       </h2>
       {profile && (
         <div className="space-y-4">
-          <div>
-            <label className="font-semibold text-gray-600">Username</label>
-            <p className="text-lg">{profile.username}</p>
-          </div>
-          <div>
-            <label className="font-semibold text-gray-600">Email</label>
-            <p className="text-lg">{profile.email}</p>
-          </div>
-          <div>
-            <label className="font-semibold text-gray-600">Role</label>
-            <p className="text-lg capitalize">{profile.role}</p>
-          </div>
-          <div>
-            <label className="font-semibold text-gray-600">Member Since</label>
-            <p className="text-lg">{new Date(profile.created_at).toLocaleDateString()}</p>
-          </div>
+          {['username', 'email', 'role', 'created_at'].map(field => (
+            <div key={field}>
+              <label className="font-semibold text-gray-600 block">
+                {field === 'created_at' ? 'Member Since' : field.charAt(0).toUpperCase() + field.slice(1)}
+              </label>
+              <p className="text-lg">
+                {field === 'created_at' 
+                  ? new Date(profile[field]).toLocaleDateString() 
+                  : profile[field]}
+              </p>
+            </div>
+          ))}
         </div>
       )}
     </div>
@@ -90,7 +91,7 @@ const ProfilePage = () => {
             <div key={space.id} className="border-b pb-4 last:border-b-0">
               <h3 className="text-xl font-semibold">{space.name}</h3>
               <p className="text-gray-600 mb-2">{space.description}</p>
-              <div className="flex justify-between text-sm text-gray-500">
+              <div className="flex flex-col sm:flex-row justify-between text-sm text-gray-500 space-y-2 sm:space-y-0">
                 <span>Hourly Rate: ${space.hourly_price}</span>
                 <span>Daily Rate: ${space.daily_price}</span>
               </div>
@@ -115,16 +116,21 @@ const ProfilePage = () => {
         <div className="space-y-4">
           {profile.bookings.map(booking => (
             <div key={booking.id} className="border-b pb-4 last:border-b-0">
-              <div className="flex justify-between items-center">
-                <div>
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center">
+                <div className="mb-2 sm:mb-0">
                   <h3 className="text-xl font-semibold">{booking.space_name}</h3>
-                  <p className="text-sm text-gray-600">
-                    <strong>From </strong>{new Date(booking.start_time).toLocaleString()} - 
-                    <strong> To </strong>{new Date(booking.end_time).toLocaleString()}
+                  <p className="text-sm text-gray-600 flex flex-col sm:flex-row">
+                    <span>
+                      <strong>From </strong>{new Date(booking.start_time).toLocaleString()}
+                    </span>
+                    <span className="hidden sm:inline mx-2">-</span>
+                    <span>
+                      <strong>To </strong>{new Date(booking.end_time).toLocaleString()}
+                    </span>
                   </p>
                 </div>
                 <span className={`
-                  px-3 py-1 rounded-full text-xs font-semibold
+                  px-3 py-1 rounded-full text-xs font-semibold mt-2 sm:mt-0
                   ${booking.status === 'completed' ? 'bg-green-100 text-green-800' : 
                     booking.status === 'pending' ? 'bg-blue-100 text-blue-800' :
                     booking.status === 'cancelled'? 'bg-red-100 text-red-800' : 
@@ -172,47 +178,49 @@ const ProfilePage = () => {
   return (
     <>
     <Navbar />
-    <div className="flex min-h-screen bg-gray-100">
-      {/* Sidebar */}
-      <div className="fixed left-0 top-16 bottom-0 w-64 bg-white shadow-md overflow-y-auto">
+    <div className="flex flex-col md:flex-row min-h-screen bg-gray-100">
+      {/* Mobile Menu Toggle */}
+      <div className="md:hidden fixed top-16 left-0 right-0 z-40 bg-white shadow-md">
+        <button 
+          onClick={toggleMobileMenu}
+          className="w-full p-4 flex justify-between items-center"
+        >
+          {isMobileMenuOpen ? <CloseIcon /> : <MenuIcon />}
+        </button>
+      </div>
+
+      {/* Sidebar - Mobile & Desktop */}
+      <div className={`
+        fixed left-0 top-0 bottom-0 w-64 bg-white shadow-md overflow-y-auto 
+        transition-transform duration-300 z-30
+        ${isMobileMenuOpen ? 'translate-x-0 top-16' : '-translate-x-full'}
+        md:translate-x-0 md:top-16 md:block
+      `}>
         <div className="p-6 border-b flex items-center">
           <h1 className="text-xl font-bold text-gray-800">Hello, {user?.username}</h1>
         </div>
         <nav className="p-4">
           <ul className="space-y-2">
-            <li>
-              <button 
-                onClick={() => setActiveSection('profile')}
-                className={`
-                  w-full flex items-center p-3 rounded-lg transition-colors 
-                  ${activeSection === 'profile' ? 'bg-blue-100 text-blue-800' : 'hover:bg-gray-100'}
-                `}
-              >
-                <UserIcon className="mr-3" /> Profile Details
-              </button>
-            </li>
-            <li>
-              <button 
-                onClick={() => setActiveSection('spaces')}
-                className={`
-                  w-full flex items-center p-3 rounded-lg transition-colors 
-                  ${activeSection === 'spaces' ? 'bg-blue-100 text-blue-800' : 'hover:bg-gray-100'}
-                `}
-              >
-                <HomeIcon className="mr-3" /> My Spaces
-              </button>
-            </li>
-            <li>
-              <button 
-                onClick={() => setActiveSection('bookings')}
-                className={`
-                  w-full flex items-center p-3 rounded-lg transition-colors 
-                  ${activeSection === 'bookings' ? 'bg-blue-100 text-blue-800' : 'hover:bg-gray-100'}
-                `}
-              >
-                <CalendarIcon className="mr-3" /> My Bookings
-              </button>
-            </li>
+            {[
+              { section: 'profile', icon: UserIcon, label: 'Profile Details' },
+              { section: 'spaces', icon: HomeIcon, label: 'My Spaces' },
+              { section: 'bookings', icon: CalendarIcon, label: 'My Bookings' }
+            ].map(({ section, icon: Icon, label }) => (
+              <li key={section}>
+                <button 
+                  onClick={() => {
+                    setActiveSection(section);
+                    setIsMobileMenuOpen(false);
+                  }}
+                  className={`
+                    w-full flex items-center p-3 rounded-lg transition-colors 
+                    ${activeSection === section ? 'bg-blue-100 text-blue-800' : 'hover:bg-gray-100'}
+                  `}
+                >
+                  <Icon className="mr-3" /> {label}
+                </button>
+              </li>
+            ))}
             <li>
               <button 
                 onClick={handleLogout}
@@ -225,8 +233,8 @@ const ProfilePage = () => {
         </nav>
       </div>
 
-      {/* Main Content Area - Scrollable with Left Margin */}
-      <div className="flex-1 ml-64 p-10 overflow-y-auto">
+      {/* Main Content Area - Responsive Layout */}
+      <div className="flex-1 md:ml-64 p-4 md:p-10 mt-16 md:mt-0 overflow-y-auto">
         {activeSection === 'profile' && renderProfileDetails()}
         {activeSection === 'spaces' && renderSpaces()}
         {activeSection === 'bookings' && renderBookings()}
