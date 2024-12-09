@@ -2,7 +2,7 @@ import { Facebook, Twitter, Instagram, Linkedin } from 'lucide-react';
 
 const Footer = () => {
   return (
-    <footer className="bg-gradient-to-r from-gray-500 to-gray-800 text-white py-8">
+    <footer className="relative z-50 bg-gradient-to-r from-gray-500 to-gray-800 text-white py-8">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
           {/* About Section */}
