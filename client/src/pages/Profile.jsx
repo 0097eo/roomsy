@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { User as UserIcon, Home as HomeIcon, Calendar as CalendarIcon, LogOut as LogOutIcon, Menu as MenuIcon, X as CloseIcon } from 'lucide-react';
+import { User as UserIcon, Home as HomeIcon, Calendar as CalendarIcon, LogOut as LogOutIcon, Menu as MenuIcon, X as CloseIcon, Settings as SettingsIcon, Eye as EyeIcon, EyeOff as EyeOffIcon, Trash2 as TrashIcon } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import Navbar from '../components/NavBar';
 import Footer from '../components/Footer';
@@ -10,6 +10,21 @@ const ProfilePage = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [showPasswords, setShowPasswords] = useState({
+    currentPassword: false,
+    newPassword: false,
+    confirmPassword: false
+  });
+  const [settingsForm, setSettingsForm] = useState({
+    username: '',
+    email: '',
+    currentpassword: '',
+    newpassword: '',
+    confirmPassword: ''
+  });
+  const [settingsError, setSettingsError] = useState(null);
+  const [settingsSuccess, setSettingsSuccess] = useState(null);
+  const [showDeleteConfirmation, setShowDeleteConfirmation] = useState(false);
 
   const { user, logout } = useAuth();
 
@@ -36,6 +51,11 @@ const ProfilePage = () => {
 
         const data = await response.json();
         setProfile(data);
+        setSettingsForm(prev=>({
+          ...prev,
+          username: data.username,
+          email: data.email,
+        }))
         setLoading(false);
       } catch (err) {
         console.error('Profile fetch error:', err);
@@ -47,6 +67,34 @@ const ProfilePage = () => {
     fetchProfile();
   }, [user]);
 
+  const togglePasswordVisibility = (field) => {
+    setShowPasswords(prev => ({
+     ...prev,
+      [field]:!prev[field]
+    }));
+  }
+
+  const handleDeleteProfile = async () => {
+    try {
+      const response = await fetch('/api/profile', {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${user.token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to delete profile');
+      }
+      logout();
+      window.location.href = '/';
+    } catch (err) {
+      setSettingsError(err.message);
+      setShowDeleteConfirmation(false);
+    }
+  };
+
   const handleLogout = () => {
     logout();
     window.location.href = '/login';
@@ -56,6 +104,216 @@ const ProfilePage = () => {
     setIsMobileMenuOpen(!isMobileMenuOpen);
   };
 
+  const handleSettingsChange = (e) => {
+    const { name, value } = e.target;
+    setSettingsForm(prev => ({
+     ...prev,
+      [name]: value
+    }));
+    setSettingsError(null);
+    setSettingsSuccess(null);
+  }
+
+  const handleSettingsSubmit = async (e) => {
+    e.preventDefault();
+
+    if (settingsForm.newpassword!== settingsForm.confirmPassword) {
+      setSettingsError('Passwords do not match');
+      return;
+    }
+
+    try {
+      const response = await fetch('/api/profile', {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${user.token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          username: settingsForm.username,
+          email: settingsForm.email,
+          currentPassword: settingsForm.currentPassword,
+          newPassword: settingsForm.newPassword
+        })
+      });
+      const data = await response.json
+
+      if (!response.ok) {
+        throw new Error(data.message || 'Failed to update profile');
+      }
+      setSettingsForm({
+        username: '',
+        email: '',
+        currentpassword: '',
+        newpassword: '',
+        confirmPassword: ''
+      })
+
+      setSettingsSuccess('Profile updated successfully');
+    }catch(err){
+      setSettingsError(err.message);
+    }
+  }
+
+
+  const renderSettingsSection = () => (
+    <div className="p-6 bg-white rounded-lg shadow-md">
+      <h2 className="text-2xl font-bold mb-4 flex items-center">
+        <SettingsIcon className="mr-3 text-gray-600" /> Account Settings
+      </h2>
+      <form onSubmit={handleSettingsSubmit} className="space-y-4">
+        {settingsError && (
+          <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative" role="alert">
+            {settingsError}
+          </div>
+        )}
+        {settingsSuccess && (
+          <div className="bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded relative" role="alert">
+            {settingsSuccess}
+          </div>
+        )}
+        <div>
+          <label htmlFor="username" className="block text-gray-700 font-bold mb-2">
+            Username
+          </label>
+          <input
+            type="text"
+            id="username"
+            name="username"
+            value={settingsForm.username}
+            onChange={handleSettingsChange}
+            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+            required
+          />
+        </div>
+        <div>
+          <label htmlFor="email" className="block text-gray-700 font-bold mb-2">
+            Email
+          </label>
+          <input
+            type="email"
+            id="email"
+            name="email"
+            value={settingsForm.email}
+            onChange={handleSettingsChange}
+            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+            required
+          />
+        </div>
+        <div className="relative">
+          <label htmlFor="currentPassword" className="block text-gray-700 font-bold mb-2">
+            Current Password
+          </label>
+          <div className="flex items-center">
+            <input
+              type={showPasswords.currentPassword ? "text" : "password"}
+              id="currentPassword"
+              name="currentPassword"
+              value={settingsForm.currentPassword}
+              onChange={handleSettingsChange}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 pr-10"
+              placeholder="Enter current password to make changes"
+            />
+            <button
+              type="button"
+              onClick={() => togglePasswordVisibility('currentPassword')}
+              className="absolute right-2 top-12 transform -translate-y-1/2"
+            >
+              {showPasswords.currentPassword ? <EyeOffIcon size={20} /> : <EyeIcon size={20} />}
+            </button>
+          </div>
+        </div>
+        <div className="relative">
+          <label htmlFor="newPassword" className="block text-gray-700 font-bold mb-2">
+            New Password
+          </label>
+          <div className="flex items-center">
+            <input
+              type={showPasswords.newPassword ? "text" : "password"}
+              id="newPassword"
+              name="newPassword"
+              value={settingsForm.newPassword}
+              onChange={handleSettingsChange}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 pr-10"
+              placeholder="Leave blank if you don't want to change password"
+            />
+            <button
+              type="button"
+              onClick={() => togglePasswordVisibility('newPassword')}
+              className="absolute right-2 top-12 transform -translate-y-1/2"
+            >
+              {showPasswords.newPassword ? <EyeOffIcon size={20} /> : <EyeIcon size={20} />}
+            </button>
+          </div>
+        </div>
+        <div className="relative">
+          <label htmlFor="confirmPassword" className="block text-gray-700 font-bold mb-2">
+            Confirm New Password
+          </label>
+          <div className="flex items-center">
+            <input
+              type={showPasswords.confirmPassword ? "text" : "password"}
+              id="confirmPassword"
+              name="confirmPassword"
+              value={settingsForm.confirmPassword}
+              onChange={handleSettingsChange}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 pr-10"
+              placeholder="Confirm new password"
+            />
+            <button
+              type="button"
+              onClick={() => togglePasswordVisibility('confirmPassword')}
+              className="absolute right-2 top-12 transform -translate-y-1/2"
+            >
+              {showPasswords.confirmPassword ? <EyeOffIcon size={20} /> : <EyeIcon size={20} />}
+            </button>
+          </div>
+        </div>
+        <div className="flex space-x-4">
+          <button
+            type="submit"
+            className="flex-1 bg-blue-500 text-white py-2 rounded-md hover:bg-blue-600 transition duration-300"
+          >
+            Update Profile
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowDeleteConfirmation(true)}
+            className="flex-1 bg-red-500 text-white py-2 rounded-md hover:bg-red-600 transition duration-300 flex items-center justify-center"
+          >
+            <TrashIcon className="mr-2" /> Delete Profile
+          </button>
+        </div>
+      </form>
+
+      {/* Delete Confirmation Modal */}
+      {showDeleteConfirmation && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white p-6 rounded-lg shadow-xl max-w-sm w-full">
+            <h2 className="text-xl font-bold text-red-600 mb-4">Delete Profile</h2>
+            <p className="text-gray-700 mb-6">
+              Are you sure you want to delete your profile? This action cannot be undone.
+            </p>
+            <div className="flex space-x-4">
+              <button
+                onClick={() => setShowDeleteConfirmation(false)}
+                className="flex-1 bg-gray-200 text-gray-800 py-2 rounded-md hover:bg-gray-300 transition duration-300"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleDeleteProfile}
+                className="flex-1 bg-red-500 text-white py-2 rounded-md hover:bg-red-600 transition duration-300"
+              >
+                Confirm Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+ 
   const renderProfileDetails = () => (
     <div className="p-6 bg-white rounded-lg shadow-md">
       <h2 className="text-2xl font-bold mb-4 flex items-center">
@@ -152,7 +410,7 @@ const ProfilePage = () => {
   if (loading) {
     return (
       <div className="flex justify-center items-center min-h-screen">
-        <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-gray-900"></div>
+        <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-gray-900">Loading...</div>
       </div>
     );
   }
@@ -204,7 +462,8 @@ const ProfilePage = () => {
             {[
               { section: 'profile', icon: UserIcon, label: 'Profile Details' },
               { section: 'spaces', icon: HomeIcon, label: 'My Spaces' },
-              { section: 'bookings', icon: CalendarIcon, label: 'My Bookings' }
+              { section: 'bookings', icon: CalendarIcon, label: 'My Bookings' },
+              { section: 'settings', icon: SettingsIcon, label: 'Account Settings'}
             ].map(({ section, icon: Icon, label }) => (
               <li key={section}>
                 <button 
@@ -238,6 +497,7 @@ const ProfilePage = () => {
         {activeSection === 'profile' && renderProfileDetails()}
         {activeSection === 'spaces' && renderSpaces()}
         {activeSection === 'bookings' && renderBookings()}
+        {activeSection ==='settings' && renderSettingsSection()}
       </div>
     </div>
     <Footer/>
