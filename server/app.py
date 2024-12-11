@@ -22,7 +22,7 @@ from cloudinary.uploader import upload
 from functools import wraps
 import json
 import decimal
-
+from werkzeug.security import generate_password_hash
 
 stripe.api_key = os.getenv('STRIPE_SECRET_KEY')
 
@@ -444,37 +444,55 @@ class ProfileResource(Resource):
         
         return profile, 200
 
-    @jwt_required
+    @jwt_required()
     def put(self):
         """Update user profile"""
         current_user_id = get_jwt_identity()
-
         user = db.session.get(User, current_user_id)
-
+    
         if not user:
             return {'error': 'User not found'}, 404
-        
+    
         data = request.get_json()
-
+    
         if 'email' in data:
-            if db.session.query(User).filter_by(email=data['email'].first()):
+        # Check if email already exists, excluding the current user
+            existing_email = db.session.query(User).filter(
+                User.email == data['email'], 
+                User.id != current_user_id
+            ).first()
+        
+            if existing_email:
                 return {'error': 'Email already exists'}, 400
-            
+        
             user.email = data['email']
-
+    
         if 'username' in data:
-            if db.session.query(User).filter_by(username=data['username'].first()):
+        # Check if username already exists, excluding the current user
+            existing_username = db.session.query(User).filter(
+                User.username == data['username'], 
+                User.id != current_user_id
+            ).first()
+        
+            if existing_username:
                 return {'error': 'Username already exists'}, 400
+        
             user.username = data['username']
-
+    
         if 'password' in data:
             if len(data['password']) < 8:
-                return {'error': 'Password must be at least 8 characters long'}, 400
-            user.password_hash = data['password']
-
-        db.session.commit()
-        return {'message': 'Profile updated successfuly'}, 200
+               return {'error': 'Password must be at least 8 characters long'}, 400
+        
+        # Assuming you're using password hashing
+            user.password_hash = generate_password_hash(data['password'])
     
+        try:
+            db.session.commit()
+            return {'message': 'Profile updated successfully'}, 200
+        except Exception as e:
+            db.session.rollback()
+            return {'error': str(e)}, 500
+        
     @jwt_required()
     def delete(self):
         """Delete user profile and all associated spaces and bookings"""
