@@ -444,7 +444,52 @@ class ProfileResource(Resource):
         
         return profile, 200
 
+    @jwt_required
+    def put(self):
+        """Update user profile"""
+        current_user_id = get_jwt_identity()
+
+        user = db.session.get(User, current_user_id)
+
+        if not user:
+            return {'error': 'User not found'}, 404
+        
+        data = request.get_json()
+
+        if 'email' in data:
+            if db.session.query(User).filter_by(email=data['email'].first()):
+                return {'error': 'Email already exists'}, 400
+            
+            user.email = data['email']
+
+        if 'username' in data:
+            if db.session.query(User).filter_by(username=data['username'].first()):
+                return {'error': 'Username already exists'}, 400
+            user.username = data['username']
+
+        if 'password' in data:
+            if len(data['password']) < 8:
+                return {'error': 'Password must be at least 8 characters long'}, 400
+            user.password_hash = data['password']
+
+        db.session.commit()
+        return {'message': 'Profile updated successfuly'}, 200
     
+    @jwt_required()
+    def delete(self):
+        """Delete user profile and all associated spaces and bookings"""
+        current_user_id = get_jwt_identity()
+
+        user = db.session.get(User, current_user_id)
+
+        if not user:
+            return {'error': 'User not found'}, 404
+
+        db.session.delete(user)
+        db.session.commit()
+        return {'message': 'Profile and associated spaces and bookings deleted successfuly'}, 200
+
+
 class SpaceResource(Resource):
     ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif'}
     MAX_FILE_SIZE = 5 * 1024 * 1024  # 5MB
