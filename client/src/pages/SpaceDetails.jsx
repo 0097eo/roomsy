@@ -204,7 +204,6 @@ const SpaceDetailsPage = () => {
             type="number"
             id="duration"
             name="duration"
-            defaultValue="1"
             value={bookingDetails.duration}
             onChange={handleBookingInputChange}
             className="w-full px-3 py-2 border rounded-lg"
