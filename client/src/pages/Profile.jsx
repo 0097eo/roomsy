@@ -3,11 +3,12 @@ import { User as UserIcon, Home as HomeIcon, Calendar as CalendarIcon, LogOut as
 import { useAuth } from '../context/AuthContext';
 import Navbar from '../components/NavBar';
 import Footer from '../components/Footer';
+import { useNavigate } from 'react-router-dom';
 
 const ProfilePage = () => {
   const [activeSection, setActiveSection] = useState('profile');
   const [profile, setProfile] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [fetchLoading, setFetchLoading] = useState(true);
   const [error, setError] = useState(null);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [showPasswords, setShowPasswords] = useState({
@@ -25,17 +26,22 @@ const ProfilePage = () => {
   const [settingsError, setSettingsError] = useState(null);
   const [settingsSuccess, setSettingsSuccess] = useState(null);
   const [showDeleteConfirmation, setShowDeleteConfirmation] = useState(false);
+  const navigate = useNavigate()
 
-  const { user, logout } = useAuth();
+  const { user, logout, isAuthenticated, loading } = useAuth();
+
+  useEffect(()=>{
+    if (!loading && !isAuthenticated){
+      navigate('/login')
+    }
+  }, [isAuthenticated, loading, navigate])
+
 
   useEffect(() => {
     const fetchProfile = async () => {
-      if (!user || !user.token) {
-        setError('Not authenticated');
-        setLoading(false);
-        return;
-      }
-
+      if (loading || !user?.token) return;
+      setFetchLoading(true);
+      setError(null);
       try {
         const response = await fetch('/api/profile', {
           method: 'GET',
@@ -56,16 +62,16 @@ const ProfilePage = () => {
           username: data.username,
           email: data.email,
         }))
-        setLoading(false);
+        setFetchLoading(false);
       } catch (err) {
         console.error('Profile fetch error:', err);
         setError(err.message);
-        setLoading(false);
+        setFetchLoading(false);
       }
     };
 
     fetchProfile();
-  }, [user]);
+  }, [user?.token, loading]);
 
   const togglePasswordVisibility = (field) => {
     setShowPasswords(prev => ({
@@ -407,7 +413,7 @@ const ProfilePage = () => {
   );
 
   // Loading state
-  if (loading) {
+  if (fetchLoading) {
     return (
       <div className="flex justify-center items-center min-h-screen">
         <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-gray-900">Loading...</div>

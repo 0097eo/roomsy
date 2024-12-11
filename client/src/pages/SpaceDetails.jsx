@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import Navbar from '../components/NavBar';
 import Slider from 'react-slick';
@@ -15,9 +15,10 @@ const stripePromise = loadStripe('pk_test_51NE6IvDIBn8bHgYOZX4OodROekrijUm8OHXK9
 
 const SpaceDetailsPage = () => {
   const { id } = useParams();
-  const { user } = useAuth();
+  const navigate = useNavigate();
+  const { user, isAuthenticated, loading } = useAuth();
   const [space, setSpace] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [fetchLoading, setFetchLoading] = useState(true);
   const [error, setError] = useState(null);
   const [selectedImage, setSelectedImage] = useState(null);
   const [showShareOptions, setShowShareOptions] = useState(false);
@@ -32,8 +33,18 @@ const SpaceDetailsPage = () => {
   const [bookingError, setBookingError] = useState(null);
   const [paymentClientSecret, setPaymentClientSecret] = useState(null);
 
+  useEffect(()=>{
+    if (!loading && !isAuthenticated){
+      navigate('/login')
+    }
+  }, [isAuthenticated, loading, navigate])
+
   useEffect(() => {
     const fetchSpaceDetails = async () => {
+      if (loading || !user?.token) return;
+
+      setFetchLoading(true);
+      setError(null);
       try {
         const response = await fetch(`/api/spaces/${id}`, {
           headers: {
@@ -50,12 +61,12 @@ const SpaceDetailsPage = () => {
       } catch (err) {
         setError(err.message);
       } finally {
-        setLoading(false);
+        setFetchLoading(false);
       }
     };
 
     fetchSpaceDetails();
-  }, [id, user.token]);
+  }, [id, user?.token, loading]);
 
   const handleImageClick = (image) => {
     setSelectedImage(image);
@@ -328,7 +339,7 @@ const SpaceDetailsPage = () => {
   const isBookingDisabled = space?.status?.toLowerCase() === 'booked' || 
                              space?.status?.toLowerCase() === 'maintenance';
 
-  if (loading) {
+  if (fetchLoading) {
     return (
       <div className="bg-white min-h-screen">
         <Navbar />
