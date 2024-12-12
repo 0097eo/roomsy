@@ -38,7 +38,7 @@ const Footer = () => {
             <h3 className="text-lg font-semibold mb-4">Connect With Us</h3>
             <p className="text-sm mb-4">Have questions? Reach out to us:</p> 
             <p className="text-sm">
-              Email: <a href="mailto:support@projecteleven.com" className="underline">support@roomsy.com</a>
+              Email: <a href="mailto:support@roomsy.com" className="underline">support@roomsy.com</a>
             </p>
             <div className="flex space-x-4 mt-4">
               <a
