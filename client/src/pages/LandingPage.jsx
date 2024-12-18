@@ -427,10 +427,12 @@ const LandingPage = () => {
 
       <button
         onClick={() => setModalOpen(true)}
-        className="fixed bottom-6 right-6 bg-blue-500 text-white p-4 rounded-full shadow-lg hover:bg-blue-600"
+        className="fixed bottom-6 right-6 flex items-center justify-center bg-blue-500 text-white p-4 rounded-full shadow-lg hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:ring-offset-2 transition duration-300 ease-in-out"
       >
-        <Pencil/>
+        <Pencil className="mr-2 w-5 h-5" />
+        Create
       </button>
+
 
       {/* Modal */}
       {modalOpen && (
@@ -440,10 +442,12 @@ const LandingPage = () => {
             <h2 className="text-xl font-bold">Create New Space</h2>
             <button 
               onClick={() => setModalOpen(false)}
-              className="text-gray-600 hover:text-gray-900"
+              className="flex items-center space-x-1 text-gray-600 hover:text-gray-900 focus:outline-none focus:ring-2 focus:ring-gray-400 focus:ring-offset-2 transition duration-300 ease-in-out"
             >
-              <X size={24} />
+              <X size={24} className="w-5 h-5" />
+              <span>Close</span>
             </button>
+
           </div>
 
           {/* Error Display */}
