@@ -460,12 +460,19 @@ const LandingPage = () => {
           {/* Image Upload */}
           <div className="space-y-4">
             <div className="mb-4">
-              <label className="block text-sm font-medium text-gray-700 mb-2">
+              <label 
+                htmlFor="image-upload" 
+                className="block text-sm font-medium text-gray-700 mb-2"
+              >
                 Images (Primary + Additional)
               </label>
               <div className="flex items-center space-x-4">
-                <label className="cursor-pointer">
+                <label 
+                  htmlFor="image-upload"
+                  className="cursor-pointer"
+                >
                   <input
+                    id="image-upload"
                     type="file"
                     multiple
                     accept="image/*"
@@ -503,6 +510,7 @@ const LandingPage = () => {
                 ))}
               </div>
             </div>
+
 
             {/* Space Details Inputs */}
             <input
